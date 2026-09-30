@@ -1,0 +1,122 @@
+{
+ "feature_drift": {
+  "test": "synthetic feature drift",
+  "scale": 3.0,
+  "n_cases": 250,
+  "expected": "drift stability and TI fall, alarm fires (and does not fire without drift)",
+  "baseline": {
+   "mean_drift_stability": 0.9974800956294883,
+   "mean_ti": 74.03999341599936,
+   "max_feature_drift": 0.011227181277470081,
+   "alarm_fired": false,
+   "drifted_features": []
+  },
+  "drifted": {
+   "mean_drift_stability": 0.8142737133976296,
+   "mean_ti": 59.89209581665068,
+   "max_feature_drift": 0.6260943122477828,
+   "alarm_fired": true,
+   "drifted_features": [
+    "amount",
+    "log_amount",
+    "amount_ratio_baseline"
+   ]
+  },
+  "passed": true
+ },
+ "data_degradation": {
+  "test": "degraded data completeness",
+  "n_cases": 250,
+  "rows": [
+   {
+    "null_rate": 0.0,
+    "mean_dq": 1.0,
+    "floor_share": 0.0
+   },
+   {
+    "null_rate": 0.25,
+    "mean_dq": 0.7652,
+    "floor_share": 0.064
+   },
+   {
+    "null_rate": 0.5,
+    "mean_dq": 0.488,
+    "floor_share": 0.408
+   },
+   {
+    "null_rate": 0.75,
+    "mean_dq": 0.2528,
+    "floor_share": 0.756
+   },
+   {
+    "null_rate": 1.0,
+    "mean_dq": 0.0,
+    "floor_share": 1.0
+   }
+  ],
+  "expected": "data quality falls monotonically and the floor gate triggers",
+  "passed": true
+ },
+ "held_out_fraud_type": {
+  "test": "held-out fraud type",
+  "held_out": "mule_ring",
+  "expected": "familiarity falls below known fraud and ordinary traffic, the unfamiliar-pattern reason fires more often than for known fraud, and held-out cases land in Low or Insufficient evidence more often than ordinary traffic",
+  "held_out_cases": {
+   "n": 44,
+   "states": {
+    "moderate": 5,
+    "high": 1,
+    "insufficient_evidence": 32,
+    "low": 6
+   },
+   "share_low_or_insufficient": 0.8636363636363636,
+   "mean_familiarity": 0.10966477272727274,
+   "share_unfamiliar_reason": 0.7272727272727273
+  },
+  "known_fraud_cases": {
+   "n": 11,
+   "states": {
+    "high": 5,
+    "insufficient_evidence": 3,
+    "moderate": 2,
+    "low": 1
+   },
+   "share_low_or_insufficient": 0.36363636363636365,
+   "mean_familiarity": 0.5542954545454546,
+   "share_unfamiliar_reason": 0.09090909090909091
+  },
+  "ordinary_cases": {
+   "n": 289,
+   "states": {
+    "moderate": 106,
+    "high": 158,
+    "insufficient_evidence": 12,
+    "low": 13
+   },
+   "share_low_or_insufficient": 0.08650519031141868,
+   "mean_familiarity": 0.5810025951557093,
+   "share_unfamiliar_reason": 0.04152249134948097
+  },
+  "review_load_ordinary_traffic": 0.08650519031141868,
+  "passed": true
+ },
+ "noisy_analyst_labels": {
+  "test": "noisy or adversarial analyst labels",
+  "status": "not_testable",
+  "reason": "needs the feedback quality engine (FQS scoring, E6), which is not built yet",
+  "expected": "feedback quality scores fall and labels are rejected (PRD 11)",
+  "passed": null
+ },
+ "novel_fraud_type": {
+  "test": "novel fraud type (H8)",
+  "n_novel": 15,
+  "share_low_or_insufficient_novel": 1.0,
+  "share_low_or_insufficient_known_fraud": 0.5681818181818182,
+  "share_low_or_insufficient_ordinary": 0.1312433581296493,
+  "state_counts_novel": {
+   "insufficient_evidence": 15
+  },
+  "expected": "never-seen fraud lands in Low or Insufficient evidence",
+  "passed": null
+ }
+}

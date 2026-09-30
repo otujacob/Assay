@@ -1,0 +1,477 @@
+{
+ "meta": {
+  "mode": "provisional",
+  "bundle_id": "b-0ee7cc94",
+  "dataset_id": "61450e08d746e552312517d8772663bb6458ee987b6adfe37a58ad3e3cefd434",
+  "n_cases": 3891,
+  "n_wrong": 57,
+  "t_high": 0.11764705882352941,
+  "created_at": "2026-09-30T21:27:52.158750+00:00",
+  "evaluation_window": "matured verified outcomes, later than training, calibration and cohort-statistics windows"
+ },
+ "overall_error_rate": {
+  "value": 0.014649190439475714,
+  "lo": 0.011324482182165538,
+  "hi": 0.018931295894196766,
+  "n": 3891,
+  "k": 57
+ },
+ "measures": {
+  "auroc": {
+   "value": 0.8736009298154097,
+   "lo": 0.8144597924476971,
+   "hi": 0.9224349104637023
+  },
+  "auroc_scored_only": 0.7185171169073126,
+  "pr_auc": 0.12099976127244536,
+  "high_trust_error_rate": {
+   "value": 0.002823529411764706,
+   "lo": 0.0012946715526638282,
+   "hi": 0.006146680528796364,
+   "n": 2125,
+   "k": 6
+  },
+  "low_trust_detection_rate": {
+   "value": 0.8245614035087719,
+   "lo": 0.7063264717030607,
+   "hi": 0.9018114776029004,
+   "n": 57,
+   "k": 47
+  },
+  "false_confidence_rate": {
+   "value": 0.10526315789473684,
+   "lo": 0.04914465852374461,
+   "hi": 0.2112281058338703,
+   "n": 57,
+   "k": 6
+  },
+  "scored_share": 0.934207144692881,
+  "state_counts": {
+   "moderate": 1110,
+   "low": 400,
+   "insufficient_evidence": 256,
+   "high": 2125
+  },
+  "trust_outcome_spearman": 0.15551156357535306,
+  "reason_code_counts": {
+   "THIN_COHORT": 139,
+   "UNFAMILIAR_PATTERN": 158
+  },
+  "coverage_curve": [
+   {
+    "coverage": 0.09997429966589566,
+    "error_rate": 0.0,
+    "errors_kept": 0
+   },
+   {
+    "coverage": 0.19994859933179132,
+    "error_rate": 0.0038560411311053984,
+    "errors_kept": 3
+   },
+   {
+    "coverage": 0.299922898997687,
+    "error_rate": 0.003427592116538132,
+    "errors_kept": 4
+   },
+   {
+    "coverage": 0.39989719866358264,
+    "error_rate": 0.003213367609254499,
+    "errors_kept": 5
+   },
+   {
+    "coverage": 0.5001285016705217,
+    "error_rate": 0.0025693730729701952,
+    "errors_kept": 5
+   },
+   {
+    "coverage": 0.6001028013364174,
+    "error_rate": 0.002569593147751606,
+    "errors_kept": 6
+   },
+   {
+    "coverage": 0.700077101002313,
+    "error_rate": 0.0025697503671071953,
+    "errors_kept": 7
+   },
+   {
+    "coverage": 0.8000514006682087,
+    "error_rate": 0.0028911018310311598,
+    "errors_kept": 9
+   },
+   {
+    "coverage": 0.9000257003341043,
+    "error_rate": 0.004283266704740148,
+    "errors_kept": 15
+   },
+   {
+    "coverage": 1.0,
+    "error_rate": 0.014649190439475714,
+    "errors_kept": 57
+   }
+  ],
+  "historical_reliability": [
+   {
+    "window": 0,
+    "n": 984,
+    "errors": 13,
+    "auroc": 0.8826744830864296,
+    "high_trust_error_rate": {
+     "value": 0.0018587360594795538,
+     "lo": 0.00032818794292792993,
+     "hi": 0.010452564850348407,
+     "n": 538,
+     "k": 1
+    }
+   },
+   {
+    "window": 1,
+    "n": 938,
+    "errors": 13,
+    "auroc": 0.8902286902286903,
+    "high_trust_error_rate": {
+     "value": 0.0019880715705765406,
+     "lo": 0.0003510296955413451,
+     "hi": 0.011174189323214307,
+     "n": 503,
+     "k": 1
+    }
+   },
+   {
+    "window": 2,
+    "n": 960,
+    "errors": 15,
+    "auroc": 0.9184832451499119,
+    "high_trust_error_rate": {
+     "value": 0.001953125,
+     "lo": 0.00034485776154337486,
+     "hi": 0.010979278212421853,
+     "n": 512,
+     "k": 1
+    }
+   },
+   {
+    "window": 3,
+    "n": 1009,
+    "errors": 16,
+    "auroc": 0.8142308660624371,
+    "high_trust_error_rate": {
+     "value": 0.005244755244755245,
+     "lo": 0.0017852597363185877,
+     "hi": 0.01530531036755885,
+     "n": 572,
+     "k": 3
+    }
+   }
+  ],
+  "segments": {
+   "channel": {
+    "app": {
+     "n": 954,
+     "errors": 5,
+     "status": "ok",
+     "auroc": {
+      "value": 0.7938883034773446,
+      "lo": 0.1881748120300752,
+      "hi": 0.9805740464281812
+     },
+     "high_trust_error_rate": {
+      "value": 0.0018832391713747645,
+      "lo": 0.0003325153450393012,
+      "hi": 0.01058933583974792,
+      "n": 531,
+      "k": 1
+     }
+    },
+    "card_not_present": {
+     "n": 1041,
+     "errors": 10,
+     "status": "ok",
+     "auroc": {
+      "value": 0.8548011639185258,
+      "lo": 0.7084835697210295,
+      "hi": 0.9642581442514894
+     },
+     "high_trust_error_rate": {
+      "value": 0.0017452006980802793,
+      "lo": 0.0003081372335465961,
+      "hi": 0.009818490683657064,
+      "n": 573,
+      "k": 1
+     }
+    },
+    "card_present": {
+     "n": 981,
+     "errors": 12,
+     "status": "ok",
+     "auroc": {
+      "value": 0.8550911592707258,
+      "lo": 0.7293550873586845,
+      "hi": 0.9566334868450209
+     },
+     "high_trust_error_rate": {
+      "value": 0.0018975332068311196,
+      "lo": 0.00033503977280462463,
+      "hi": 0.01066910981579643,
+      "n": 527,
+      "k": 1
+     }
+    },
+    "open_banking": {
+     "n": 19,
+     "errors": 19,
+     "status": "inconclusive"
+    },
+    "web": {
+     "n": 896,
+     "errors": 11,
+     "status": "ok",
+     "auroc": {
+      "value": 0.7696456086286595,
+      "lo": 0.5997114222183156,
+      "hi": 0.9231500792884721
+     },
+     "high_trust_error_rate": {
+      "value": 0.006072874493927126,
+      "lo": 0.002067430448885353,
+      "hi": 0.017700828394014052,
+      "n": 494,
+      "k": 3
+     }
+    }
+   },
+   "amount_band": {
+    "b0": {
+     "n": 877,
+     "errors": 11,
+     "status": "ok",
+     "auroc": {
+      "value": 0.900587864791098,
+      "lo": 0.813810536984798,
+      "hi": 0.9557992006709571
+     },
+     "high_trust_error_rate": {
+      "value": 0.002079002079002079,
+      "lo": 0.0003670892351313928,
+      "hi": 0.011681094174972642,
+      "n": 481,
+      "k": 1
+     }
+    },
+    "b1": {
+     "n": 2340,
+     "errors": 30,
+     "status": "ok",
+     "auroc": {
+      "value": 0.8514718614718615,
+      "lo": 0.7464278260076855,
+      "hi": 0.9396391745869693
+     },
+     "high_trust_error_rate": {
+      "value": 0.0033422459893048127,
+      "lo": 0.0014284268431604143,
+      "hi": 0.0078001877809329104,
+      "n": 1496,
+      "k": 5
+     }
+    },
+    "b2": {
+     "n": 635,
+     "errors": 15,
+     "status": "ok",
+     "auroc": {
+      "value": 0.9333333333333333,
+      "lo": 0.8530589663049685,
+      "hi": 0.9742796141479099
+     },
+     "high_trust_error_rate": {
+      "value": 0.0,
+      "lo": 0.0,
+      "hi": 0.025299143267784395,
+      "n": 148,
+      "k": 0
+     }
+    },
+    "b3": {
+     "n": 34,
+     "errors": 1,
+     "status": "inconclusive"
+    },
+    "b4": {
+     "n": 5,
+     "errors": 0,
+     "status": "inconclusive"
+    }
+   },
+   "risk_band": {
+    "high": {
+     "n": 109,
+     "errors": 18,
+     "status": "ok",
+     "auroc": {
+      "value": 0.5,
+      "lo": 0.5,
+      "hi": 0.5
+     },
+     "high_trust_error_rate": {
+      "value": null,
+      "lo": null,
+      "hi": null,
+      "n": 0,
+      "k": 0
+     }
+    },
+    "low": {
+     "n": 3782,
+     "errors": 39,
+     "status": "ok",
+     "auroc": {
+      "value": 0.8422902238023798,
+      "lo": 0.7482106675585164,
+      "hi": 0.9137679571310892
+     },
+     "high_trust_error_rate": {
+      "value": 0.002823529411764706,
+      "lo": 0.0012946715526638282,
+      "hi": 0.006146680528796364,
+      "n": 2125,
+      "k": 6
+     }
+    }
+   }
+  }
+ },
+ "baselines": {
+  "B1_distance_from_threshold": {
+   "auroc": {
+    "value": 0.7406972700399931,
+    "lo": 0.6451982273150625,
+    "hi": 0.8176656813436021
+   },
+   "trust_index_minus_baseline": {
+    "diff": 0.13290365977541663,
+    "lo": 0.05079911569426587,
+    "hi": 0.22710158250381043,
+    "excludes_zero_above": true
+   }
+  },
+  "B2_ensemble_disagreement": {
+   "auroc": {
+    "value": 0.7900960016107038,
+    "lo": 0.7203659085451046,
+    "hi": 0.859184494109513
+   },
+   "trust_index_minus_baseline": {
+    "diff": 0.0835049282047059,
+    "lo": 0.014429545809157833,
+    "hi": 0.14443406144474966,
+    "excludes_zero_above": true
+   }
+  },
+  "B3_max_class_probability": {
+   "auroc": {
+    "value": 0.8538171851119712,
+    "lo": 0.8028631929950885,
+    "hi": 0.9055561562281446
+   },
+   "trust_index_minus_baseline": {
+    "diff": 0.019783744703438466,
+    "lo": -0.010108248964135574,
+    "hi": 0.04959337465398856,
+    "excludes_zero_above": false
+   }
+  },
+  "B4_single_components": {
+   "conf": {
+    "auroc": 0.8262087142739478,
+    "missing_share": 0.0
+   },
+   "rel": {
+    "auroc": 0.7731698834985221,
+    "missing_share": 0.0
+   },
+   "exp": {
+    "auroc": 0.4943716882189825,
+    "missing_share": 0.0
+   },
+   "fam": {
+    "auroc": 0.8429792530360852,
+    "missing_share": 0.0
+   },
+   "drift": {
+    "auroc": 0.5,
+    "missing_share": 0.0
+   },
+   "dq": {
+    "auroc": 0.5,
+    "missing_share": 0.0
+   }
+  }
+ },
+ "ablations": {
+  "conf": {
+   "auroc": 0.859644546943781,
+   "delta_auroc": -0.013956382871628703,
+   "high_trust_error_rate": 0.0023210831721470018,
+   "high_trust_n": 2585,
+   "scored_share": 0.934207144692881,
+   "verdict": "adds value (removing it hurts discrimination)"
+  },
+  "rel": {
+   "auroc": 0.8551830802880963,
+   "delta_auroc": -0.0184178495273134,
+   "high_trust_error_rate": 0.002905287623474724,
+   "high_trust_n": 1721,
+   "scored_share": 0.9593934721151375,
+   "verdict": "adds value (removing it hurts discrimination)"
+  },
+  "exp": {
+   "auroc": 0.8784238896667855,
+   "delta_auroc": 0.004822959851375819,
+   "high_trust_error_rate": 0.002139495079161318,
+   "high_trust_n": 2337,
+   "scored_share": 0.934207144692881,
+   "verdict": "no measurable effect: drop or down-weight (PRD 6.4)"
+  },
+  "fam": {
+   "auroc": 0.873596353952173,
+   "delta_auroc": -4.575863236655486e-06,
+   "high_trust_error_rate": 0.0031496062992125984,
+   "high_trust_n": 2540,
+   "scored_share": 0.9642765355949627,
+   "verdict": "no measurable effect: drop or down-weight (PRD 6.4)"
+  },
+  "drift": {
+   "auroc": 0.8736009298154097,
+   "delta_auroc": 0.0,
+   "high_trust_error_rate": 0.00257201646090535,
+   "high_trust_n": 1944,
+   "scored_share": 0.934207144692881,
+   "verdict": "no measurable effect: drop or down-weight (PRD 6.4)"
+  },
+  "dq": {
+   "auroc": 0.8736009298154097,
+   "delta_auroc": 0.0,
+   "high_trust_error_rate": 0.00257201646090535,
+   "high_trust_n": 1944,
+   "scored_share": 0.934207144692881,
+   "verdict": "no measurable effect: drop or down-weight (PRD 6.4)"
+  }
+ },
+ "pass_criteria": {
+  "trust_index_beats_B1_to_B3_with_ci_excluding_no_improvement": {
+   "B1_distance_from_threshold": true,
+   "B2_ensemble_disagreement": true,
+   "B3_max_class_probability": false
+  },
+  "high_trust_error_rate_materially_below_overall": true,
+  "calibrated_mode_ece": "not applicable: Provisional mode makes no probability claim",
+  "atce_supported_as_specified": false,
+  "if_not_supported": "revise the components or the method; do not relax the criteria (PRD 6.6)"
+ },
+ "limitations": [
+  "Synthetic data with simulated labels and analysts: tests the machinery, not real fraud.",
+  "Selective-label bias (PRD 6.3) is not modelled: every synthetic case receives an outcome.",
+  "New-versus-existing-customer segment is not reported (no tenure feature yet).",
+  "Explanations cover the boosted-tree members only."
+ ]
+}
