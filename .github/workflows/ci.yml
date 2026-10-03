@@ -34,7 +34,8 @@ jobs:
       # FR-44: fail the build on a known-vulnerable dependency.
       - run: pip install pip-audit && pip-audit
   secrets:
-    # FR-44: fail the build on a committed secret. Full history, so an old leak is also caught.
+    # FR-44: fail the build on a committed secret. On a push this scans the commits in that push, not the
+    # whole history; every commit pushed so far has been scanned once. A full-history scan needs the CLI.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

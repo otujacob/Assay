@@ -28,7 +28,7 @@ exists for it, and what is needed from others. It is a working document, not a c
 | Role-based access | **Built** | Permission tests per route. Separation of duties for policies (proposer cannot approve) is enforced in the service and the database |
 | Audit logs | **Built** | Append-only, hash-chained, row-level secured. Failed sign-ins and refused roles are recorded; reading the log is recorded |
 | Tenant isolation | **Built** | As above |
-| Secrets management | **Partly** | Secrets come from the environment. No secret manager integration. CI scans history for committed secrets and passed |
+| Secrets management | **Partly** | Secrets come from the environment. No secret manager integration. CI scans each push's commits for committed secrets and has passed on every commit pushed so far (it does not re-scan older history on each push) |
 | API security | **Partly** | Signed requests, schema validation, rate limiting (per process), idempotency. Signing secrets are shared and have no rotation process |
 | Privileged access | **Not built** | No just-in-time support access |
 | Secure development | **Partly** | CI runs lint, tests, a dependency audit (passing) and a secret scan (passing). No signed builds, no SBOM, no container scanning |
