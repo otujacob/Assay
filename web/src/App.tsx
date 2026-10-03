@@ -3,6 +3,7 @@ import { ApiError, api, getUser, setUser } from "./api";
 import { AuditLog } from "./components/AuditLog";
 import { CaseDetails } from "./components/CaseDetails";
 import { Governance } from "./components/Governance";
+import { PolicyPanel } from "./components/PolicyPanel";
 import { KpiCards } from "./components/KpiCards";
 import { EMPTY_FILTERS, ReviewQueue, type QueueFilterState } from "./components/ReviewQueue";
 import { TopBar } from "./components/TopBar";
@@ -152,6 +153,9 @@ export default function App() {
             <div className="panel pad muted">Your role does not include the review queue.</div>
           )}
           <Governance report={report} bundle={bundle} />
+          {(roles.has("admin") || roles.has("approver") || roles.has("auditor")) && (
+            <PolicyPanel userKey={user} roles={roles} />
+          )}
           {roles.has("auditor") && <AuditLog />}
         </div>
         <div className="right-col">

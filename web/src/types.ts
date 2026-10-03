@@ -47,6 +47,17 @@ export interface AuditResponse {
   chain_ok: boolean;
 }
 
+export interface PolicyVersion {
+  id: string;
+  version: string;
+  payload: { dq_gate_action: "request_human_review" | "hold"; automation_level: number };
+  effective_from: string;
+  proposed_by: string;
+  status: "pending" | "approved";
+  approved_by: string | null;
+  approved_at: string | null;
+}
+
 export type CaseStatus = "open" | "escalated" | "decided" | "conflicted" | "adjudicated" | "superseded";
 
 export interface QueueResponse {

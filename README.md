@@ -108,7 +108,7 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | E7 Validation harness and dashboard | baselines B1 to B4, ablations, four accuracy measures, stress tests, stored reports, dashboard summary: done |
 | E8 Lineage completion | every decision step is an append-only record; replay reproduces decisions; audit-log search and CSV/JSON export (FR-34) with an auditor UI panel: done (tested on the in-memory store; the PostgreSQL path is unexercised) |
 | E9 Security and tenancy | tenant isolation, signed requests, roles, non-superuser enforcement, rate limiting, access events in the audit log (FR-43), CI secret and dependency scans (FR-44): done. Per-tenant encryption (FR-41): model bundles only, with a local key provider ([docs/security/key-management.md](docs/security/key-management.md)). SSO, MFA, a managed key service, encrypted exports, penetration test: **not done** |
-| Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs: done. 60 unit tests plus a browser end-to-end check |
+| Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs, policy proposal and approval, auditor log: done. 73 unit tests; the browser end-to-end check (`web/scripts/e2e.mjs`) has not been rerun since the policy and audit panels were added |
 
 ## What the validation found
 On synthetic data the Trust Index beats the two simplest uncertainty baselines, and cases rated High

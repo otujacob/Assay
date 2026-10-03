@@ -1,5 +1,5 @@
 import type {
-  ActionRequest, ActionResponse, AuditResponse, BundleInfo, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
+  ActionRequest, ActionResponse, AuditResponse, BundleInfo, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -87,6 +87,10 @@ const auditQs = (f: AuditFilters, format?: "csv"): string => {
 };
 
 export const api = {
+  policies: () => call<{ items: PolicyVersion[] }>("GET", "/config/policies"),
+  proposePolicy: (body: { dq_gate_action: string; effective_from?: string }) =>
+    call<PolicyVersion>("POST", "/config/policies", body),
+  approvePolicy: (id: string) => call<PolicyVersion>("POST", `/config/policies/${id}/approve`, {}),
   audit: (f: AuditFilters = {}) => call<AuditResponse>("GET", `/audit/export${auditQs(f)}`),
   /** The CSV export as a Blob, so the browser can save it (the demo user is a header, not a cookie). */
   auditCsv: async (f: AuditFilters = {}): Promise<Blob> => {
