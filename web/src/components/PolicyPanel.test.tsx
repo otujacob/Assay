@@ -18,7 +18,7 @@ describe("PolicyPanel", () => {
     vi.spyOn(api, "policies").mockResolvedValue({ items: [pv()] });
     render(<PolicyPanel userKey="auditor" roles={roles("auditor")} />);
     expect(await screen.findByText("policy-1")).toBeInTheDocument();
-    expect(screen.getByText("Hold the transaction")).toBeInTheDocument();
+    expect(screen.getByText("Hold on poor data")).toBeInTheDocument();
     expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument(); // read-only roles cannot act
     expect(screen.queryByRole("button", { name: "Propose policy" })).not.toBeInTheDocument();

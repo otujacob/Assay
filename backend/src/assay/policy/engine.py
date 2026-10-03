@@ -1,7 +1,8 @@
 """Decision policy engine (PRD 10.2, 10.3, FR-22, FR-23).
 
 Fixed evaluation order: hard rules, data-quality gate, novelty gate, then the
-trust x risk matrix. Automation level is 0 in the MVP, so every output is a
+trust x risk matrix, and last the institution's segment rule (which can only make a
+decision stricter). Automation level is 0 in the MVP, so every output is a
 recommendation.
 """
 
@@ -29,6 +30,11 @@ class Action(str, Enum):
     HOLD = "hold"
 
 
+# The actions that put a case in front of a person. The review queue and policy replay both count these.
+REVIEW_ACTIONS = frozenset({Action.REQUEST_HUMAN_REVIEW.value, Action.REQUEST_HUMAN_REVIEW_PRIORITY.value,
+                            Action.ESCALATE.value, Action.HOLD.value})
+
+
 @dataclass(frozen=True)
 class PolicyConfig:
     version: str = "policy-0"
@@ -36,6 +42,9 @@ class PolicyConfig:
     t_high: float = 0.75  # operating threshold, also defines the fraud call (PRD 6.1)
     automation_level: int = 0
     dq_gate_action: Action = Action.REQUEST_HUMAN_REVIEW  # or HOLD, per tenant
+    # Segment rule (PRD 10.4): always send a transaction of at least this amount to a human, even if the
+    # matrix would approve it. It never loosens anything: block, escalate and review stay as they are.
+    always_review_above: float | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +53,7 @@ class PolicyInput:
     trust_state: TrustState
     reason_codes: tuple[ReasonCode, ...] = ()
     hard_rule_action: Action | None = None  # e.g. sanctions hit
+    amount: float | None = None  # for the segment rule; None means the rule cannot apply
 
 
 @dataclass(frozen=True)
@@ -101,4 +111,9 @@ def evaluate(inp: PolicyInput, cfg: PolicyConfig | None = None) -> PolicyResult:
         return res(cfg.dq_gate_action, "data_quality")
     if ReasonCode.UNFAMILIAR_PATTERN in inp.reason_codes:
         return res(Action.REQUEST_HUMAN_REVIEW, "novelty", queue="novelty")
-    return res(_M[band][inp.trust_state], "matrix")
+    action = _M[band][inp.trust_state]
+    if (cfg.always_review_above is not None and inp.amount is not None
+            and inp.amount >= cfg.always_review_above
+            and action in (Action.APPROVE, Action.APPROVE_SAMPLED_QA)):
+        return res(Action.REQUEST_HUMAN_REVIEW, "segment_rule")
+    return res(action, "matrix")

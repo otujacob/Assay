@@ -47,15 +47,39 @@ export interface AuditResponse {
   chain_ok: boolean;
 }
 
+export interface PolicyPayload {
+  dq_gate_action: "request_human_review" | "hold";
+  automation_level: number;
+  t_low?: number;
+  t_high?: number;
+  always_review_above?: number;
+}
+
 export interface PolicyVersion {
   id: string;
   version: string;
-  payload: { dq_gate_action: "request_human_review" | "hold"; automation_level: number };
+  payload: PolicyPayload;
   effective_from: string;
   proposed_by: string;
   status: "pending" | "approved";
   approved_by: string | null;
   approved_at: string | null;
+}
+
+/** What a proposed policy would have done to past cases, against the policy in force (PRD 10.4). */
+export interface PolicyPreview {
+  policy: PolicyPayload;
+  baseline_version: string;
+  n_decisions: number;
+  skipped: number;
+  window: { from: string | null; to: string | null };
+  review_volume: { before: number; after: number; change: number; change_pct: number | null };
+  actions: { before: Record<string, number>; after: Record<string, number> };
+  risk_bands: { before: Record<string, number>; after: Record<string, number> };
+  changed_decisions: number;
+  changes: { from: string; to: string; count: number }[];
+  examples: { txn_id: string; amount: number; risk: number; was: string; now: string; because: string }[];
+  caveats: string[];
 }
 
 export type CaseStatus = "open" | "escalated" | "decided" | "conflicted" | "adjudicated" | "superseded";

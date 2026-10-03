@@ -58,7 +58,20 @@ def test_approval_is_once_only_and_unknown_ids_are_404(svc):
     ({"automation_level": 1}, "automation_not_supported"),   # FR-23: recommend-only
     ({"automation_level": True}, "automation_not_supported"),
     ({"dq_gate_action": "approve"}, "bad_dq_gate_action"),
-    ({"t_high": 0.1}, "unknown_fields"),                     # thresholds belong to the model bundle
+    ({"colour": "red"}, "unknown_fields"),
+    ({"t_high": 0.6}, "thresholds_together"),
+    ({"t_low": 0.2}, "thresholds_together"),
+    ({"t_low": 0.7, "t_high": 0.3}, "bad_thresholds"),           # must be ordered
+    ({"t_low": 0.5, "t_high": 0.5}, "bad_thresholds"),
+    ({"t_low": 0, "t_high": 0.5}, "bad_thresholds"),             # strictly inside (0, 1)
+    ({"t_low": 0.2, "t_high": 1}, "bad_thresholds"),
+    ({"t_low": "0.2", "t_high": 0.5}, "bad_thresholds"),
+    ({"t_low": True, "t_high": 0.5}, "bad_thresholds"),
+    ({"t_low": float("nan"), "t_high": 0.5}, "bad_thresholds"),
+    ({"always_review_above": 0}, "bad_amount"),
+    ({"always_review_above": -5}, "bad_amount"),
+    ({"always_review_above": "big"}, "bad_amount"),
+    ({"always_review_above": float("inf")}, "bad_amount"),
 ])
 def test_invalid_policies_are_refused(svc, payload, code):
     s, _ = svc
@@ -198,3 +211,17 @@ def test_decisions_record_the_policy_version_in_force(api):
     # The decision made earlier keeps the version it was made under.
     again = call("GET", f"/v1/decisions/{first['decision_id']}", "aud").json()
     assert again["policy_version"] == "policy-0"
+
+
+def test_a_policy_can_set_risk_thresholds_and_a_segment_rule_and_they_reach_the_engine(svc):
+    s, clock = svc
+    p = s.propose(T, "u:alice", {"t_low": 0.2, "t_high": 0.6, "always_review_above": 5000})
+    s.approve(T, "u:bob", p["id"])
+    clock["t"] = T0 + timedelta(hours=1)
+    cfg = s.config(T, clock["t"], t_low=0.3, t_high=0.75)       # the bundle says 0.3 / 0.75
+    assert (cfg.t_low, cfg.t_high, cfg.always_review_above) == (0.2, 0.6, 5000)   # the policy wins
+    q = s.propose(T, "u:alice", {"dq_gate_action": "hold"})
+    s.approve(T, "u:bob", q["id"])
+    clock["t"] = T0 + timedelta(hours=2)
+    cfg = s.config(T, clock["t"], t_low=0.3, t_high=0.75)
+    assert (cfg.t_low, cfg.t_high, cfg.always_review_above) == (0.3, 0.75, None)   # a policy that sets none falls back

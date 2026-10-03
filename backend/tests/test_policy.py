@@ -45,3 +45,28 @@ def test_gate_precedence():
 def test_automation_level_zero_only():
     with pytest.raises(NotImplementedError):
         evaluate(PolicyInput(0.1, TrustState.HIGH), PolicyConfig(automation_level=1))
+
+
+def test_segment_rule_sends_large_approvals_to_a_human_but_never_loosens_anything():
+    big = PolicyConfig(always_review_above=1000)
+    # a transaction the matrix would approve: low risk, high trust
+    assert evaluate(PolicyInput(0.1, TrustState.HIGH, amount=999.99), big).action == Action.APPROVE
+    r = evaluate(PolicyInput(0.1, TrustState.HIGH, amount=1000), big)       # at the limit counts
+    assert (r.action, r.gate) == (Action.REQUEST_HUMAN_REVIEW, "segment_rule")
+    assert evaluate(PolicyInput(0.1, TrustState.MODERATE, amount=5000), big).action == Action.REQUEST_HUMAN_REVIEW
+    # decisions that are already strict are left exactly as they were
+    for risk, state, expected in ((0.9, TrustState.HIGH, Action.BLOCK), (0.9, TrustState.LOW, Action.ESCALATE),
+                                  (0.5, TrustState.LOW, Action.ESCALATE)):
+        r = evaluate(PolicyInput(risk, state, amount=99999), big)
+        assert (r.action, r.gate) == (expected, "matrix")
+    # no amount means the rule cannot apply, and with no rule configured nothing changes
+    assert evaluate(PolicyInput(0.1, TrustState.HIGH), big).action == Action.APPROVE
+    assert evaluate(PolicyInput(0.1, TrustState.HIGH, amount=1e9), PolicyConfig()).action == Action.APPROVE
+
+
+def test_segment_rule_cannot_override_a_hard_rule_or_an_earlier_gate():
+    big = PolicyConfig(always_review_above=1)
+    r = evaluate(PolicyInput(0.1, TrustState.HIGH, hard_rule_action=Action.BLOCK, amount=500), big)
+    assert (r.action, r.gate) == (Action.BLOCK, "hard_rule")
+    r = evaluate(PolicyInput(0.1, TrustState.HIGH, (ReasonCode.UNFAMILIAR_PATTERN,), amount=500), big)
+    assert r.gate == "novelty"

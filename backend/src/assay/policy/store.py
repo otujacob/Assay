@@ -10,6 +10,7 @@ Automation above level 0 is refused here and again by the database (FR-23).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -20,7 +21,7 @@ from .engine import Action, PolicyConfig
 
 SCHEMA = "pol-1"
 DQ_ACTIONS = (Action.REQUEST_HUMAN_REVIEW.value, Action.HOLD.value)
-FIELDS = {"dq_gate_action", "automation_level"}
+FIELDS = {"dq_gate_action", "automation_level", "t_low", "t_high", "always_review_above"}
 
 
 class PolicyError(Exception):
@@ -31,6 +32,40 @@ class PolicyError(Exception):
 
 def _utc(d: datetime) -> datetime:
     return d if d.tzinfo else d.replace(tzinfo=UTC)
+
+
+def _number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """The checks a policy must pass before it is stored or replayed. Raises PolicyError."""
+    if not isinstance(payload, dict) or set(payload) - FIELDS:
+        raise PolicyError("unknown_fields", f"allowed fields: {sorted(FIELDS)}")
+    out = {"dq_gate_action": Action.REQUEST_HUMAN_REVIEW.value, "automation_level": 0, **payload}
+    if out["automation_level"] != 0 or isinstance(out["automation_level"], bool):
+        raise PolicyError("automation_not_supported", "the MVP runs at automation level 0 only (FR-23)")
+    if out["dq_gate_action"] not in DQ_ACTIONS:
+        raise PolicyError("bad_dq_gate_action", f"dq_gate_action must be one of {list(DQ_ACTIONS)}")
+    if ("t_low" in out) != ("t_high" in out):
+        raise PolicyError("thresholds_together", "t_low and t_high must be given together")
+    if "t_low" in out:
+        lo, hi = out["t_low"], out["t_high"]
+        if not (_number(lo) and _number(hi) and 0 < lo < hi < 1):
+            raise PolicyError("bad_thresholds", "t_low and t_high must be numbers with 0 < t_low < t_high < 1")
+    if "always_review_above" in out and not (_number(out["always_review_above"]) and out["always_review_above"] > 0):
+        raise PolicyError("bad_amount", "always_review_above must be a positive number")
+    return out
+
+
+def config_from_payload(payload: dict[str, Any], version: str, *, t_low: float, t_high: float) -> PolicyConfig:
+    """A PolicyConfig for a validated payload. Risk thresholds come from the policy if it sets them,
+    otherwise from the model bundle (`t_low`, `t_high` here)."""
+    return PolicyConfig(
+        version=version, t_low=payload.get("t_low", t_low), t_high=payload.get("t_high", t_high),
+        automation_level=payload.get("automation_level", 0),
+        dq_gate_action=Action(payload.get("dq_gate_action", Action.REQUEST_HUMAN_REVIEW.value)),
+        always_review_above=payload.get("always_review_above"))
 
 
 class PolicyService:
@@ -100,22 +135,20 @@ class PolicyService:
         pol = self.active(tenant_id, at)
         if pol is None:
             return PolicyConfig(version=default_version, t_low=t_low, t_high=t_high)
-        return PolicyConfig(
-            version=pol["version"], t_low=t_low, t_high=t_high,
-            automation_level=pol["payload"].get("automation_level", 0),
-            dq_gate_action=Action(pol["payload"].get("dq_gate_action", Action.REQUEST_HUMAN_REVIEW.value)))
+        return config_from_payload(pol["payload"], pol["version"], t_low=t_low, t_high=t_high)
+
+    def preview(self, tenant_id: str, actor: str, payload: dict[str, Any], *, limit: int = 5000) -> dict:
+        """Replay a proposed policy against past cases (PRD 10.4). Nothing is stored except an audit entry."""
+        from .replay import preview
+
+        out = preview(self.repo, tenant_id, payload, self.active(tenant_id), limit=limit)
+        self.repo.append_audit(tenant_id, actor, "policy_preview", "-", f"{out['n_decisions']} cases", self.clock())
+        return out
 
     # ------------------------------------------------------------------ helpers --------------
     @staticmethod
     def _validate(payload: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(payload, dict) or set(payload) - FIELDS:
-            raise PolicyError("unknown_fields", f"allowed fields: {sorted(FIELDS)}")
-        out = {"dq_gate_action": Action.REQUEST_HUMAN_REVIEW.value, "automation_level": 0, **payload}
-        if out["automation_level"] != 0 or isinstance(out["automation_level"], bool):
-            raise PolicyError("automation_not_supported", "the MVP runs at automation level 0 only (FR-23)")
-        if out["dq_gate_action"] not in DQ_ACTIONS:
-            raise PolicyError("bad_dq_gate_action", f"dq_gate_action must be one of {list(DQ_ACTIONS)}")
-        return out
+        return validate_payload(payload)
 
     @staticmethod
     def _view(pv: dict, ap: dict | None) -> dict:

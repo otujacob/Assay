@@ -227,7 +227,8 @@ class ScoringService:
             tenant_id, self.cfg.clock(), t_low=lb.manifest.thresholds["t_low"],
             t_high=lb.manifest.thresholds["t_high"], default_version=self.cfg.policy_version)
         hard = self.cfg.hard_rule(txn) if self.cfg.hard_rule else None
-        res = evaluate(PolicyInput(_f(risk), ca.result.state, ca.result.reason_codes, hard), pcfg)
+        res = evaluate(PolicyInput(_f(risk), ca.result.state, ca.result.reason_codes, hard,
+                                   amount=_f(txn["amount"])), pcfg)
         return self.repo.insert(tenant_id, "policy_decisions", {
             "schema_version": SCHEMA, "txn_id": txn["txn_id"], "trust_assessment_id": ta["id"],
             "policy_version": res.policy_version, "risk_band": res.risk_band.value, "gate": res.gate,

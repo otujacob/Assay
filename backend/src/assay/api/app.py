@@ -436,6 +436,18 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
             raise HTTPException(422, {"code": "bad_date"}) from None
         return with_policy(lambda ps: ps.propose(cred.tenant_id, f"u:{cred.key_id}", p, eff))
 
+    @app.post("/v1/config/policies/preview")
+    def preview_policy(auth=Depends(authed)):
+        """Replay a proposed policy against past cases and compare it with the policy in force (PRD 10.4).
+        Read-only: nothing is stored except an audit entry. Anyone who may see policies may preview one."""
+        cred, body = auth
+        need(cred, "admin", "approver", "auditor")
+        p = parse(body)
+        if not isinstance(p, dict):
+            raise HTTPException(400, {"code": "expected_object"})
+        p.pop("effective_from", None)  # a date does not change what the rules do
+        return with_policy(lambda ps: ps.preview(cred.tenant_id, f"u:{cred.key_id}", p))
+
     @app.post("/v1/config/policies/{policy_id}/approve")
     def approve_policy(policy_id: str, auth=Depends(authed)):
         cred, _ = auth

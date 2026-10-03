@@ -1,5 +1,5 @@
 import type {
-  ActionRequest, ActionResponse, AuditResponse, BundleInfo, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
+  ActionRequest, ActionResponse, AuditResponse, BundleInfo, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -66,6 +66,15 @@ const qs = (f: QueueFilters): string => {
   return s ? `?${s}` : "";
 };
 
+/** The editable parts of a policy. Omitted fields keep the model's own values. */
+export interface PolicyRequest {
+  dq_gate_action: string;
+  t_low?: number;
+  t_high?: number;
+  always_review_above?: number;
+  effective_from?: string;
+}
+
 export interface AuditFilters {
   txn_id?: string;
   actor?: string;
@@ -88,8 +97,8 @@ const auditQs = (f: AuditFilters, format?: "csv"): string => {
 
 export const api = {
   policies: () => call<{ items: PolicyVersion[] }>("GET", "/config/policies"),
-  proposePolicy: (body: { dq_gate_action: string; effective_from?: string }) =>
-    call<PolicyVersion>("POST", "/config/policies", body),
+  proposePolicy: (body: PolicyRequest) => call<PolicyVersion>("POST", "/config/policies", body),
+  previewPolicy: (body: PolicyRequest) => call<PolicyPreview>("POST", "/config/policies/preview", body),
   approvePolicy: (id: string) => call<PolicyVersion>("POST", `/config/policies/${id}/approve`, {}),
   audit: (f: AuditFilters = {}) => call<AuditResponse>("GET", `/audit/export${auditQs(f)}`),
   /** The CSV export as a Blob, so the browser can save it (the demo user is a header, not a cookie). */

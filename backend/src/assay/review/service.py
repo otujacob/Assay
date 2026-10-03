@@ -20,13 +20,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from assay.ingestion.repo import DuplicateError
+from assay.policy.engine import (
+    REVIEW_ACTIONS,  # one definition of "needs a person", shared with policy replay
+)
 from assay.scoring.service import ScoringError
 from assay.trust.reliability import wilson_interval
 
 from . import feedback as fb
 
 SCHEMA = "rev-1"
-REVIEW_ACTIONS = frozenset({"request_human_review", "request_human_review_priority", "escalate", "hold"})
 ANALYST_ACTIONS = frozenset({"approve", "block", "escalate", "request_review", "override", "unsure"})
 FINAL = frozenset({"approve", "block"})
 TRUST_UNRELIABILITY = {"insufficient_evidence": 1.0, "low": 0.8, "moderate": 0.4, "high": 0.1}

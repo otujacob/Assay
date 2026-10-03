@@ -104,7 +104,7 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | E2 Features and detection | point-in-time features with leakage check, ensemble, calibration, signed tenant-bound bundles: done |
 | E3 Explanation | TreeSHAP attributions with stability, sensitivity, faithfulness, reproducibility: done (boosted-tree members only) |
 | E4 Trust Index | all six components plus the assessor, Insufficient-evidence state, async refinement: done. `hum` inactive in the MVP by design |
-| E5 Policy and review | policy engine, versioned policies with second-person approval (FR-21), queue with priority and SLA, blind review, reason codes, conflicts and adjudication: done |
+| E5 Policy and review | policy engine, versioned policies with second-person approval (FR-21) that can set risk thresholds and an "always review amounts from" rule, policy replay (preview a proposed policy's effect on review volume against the policy in force; it does not predict fraud caught or analyst decisions). A policy that sets its own risk thresholds replaces the model's, so the validation figures, measured at the model's thresholds, no longer describe it, queue with priority and SLA, blind review, reason codes, conflicts and adjudication: done |
 | E6 Feedback capture | decisions, blind flag, checklist, shadow scores AAS/FCS/LVS/CRS/FQS: done. Nothing trains on them |
 | E7 Validation harness and dashboard | baselines B1 to B4, ablations, four accuracy measures, stress tests, stored reports, dashboard summary: done |
 | E8 Lineage completion | every decision step is an append-only record; replay reproduces decisions; audit-log search and CSV/JSON export (FR-34) with an auditor UI panel: done (tested on the in-memory store; the PostgreSQL path is unexercised) |
@@ -136,5 +136,5 @@ value on this data. Details, five method changes made along the way, and the lim
 - **Analyst reason codes** are working defaults, not agreed with a fraud-operations adviser.
 - **Noisy-analyst-label stress test** is reported as not testable (needs the feedback engine's learning side, V1).
 - **Not built (later phases):** calibrated mode, counterfactuals, graph store, automation above level 0,
-  policy replay, AI copilot, regulator export views.
+  AI copilot, regulator export views.
 - **Open product decisions** still on working defaults: see [docs/adr/0001-gate-0-defaults.md](docs/adr/0001-gate-0-defaults.md).

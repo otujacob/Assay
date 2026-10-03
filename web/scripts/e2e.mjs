@@ -98,11 +98,27 @@ const bannerText = (await page.locator(".banner-error").allInnerTexts()).join(" 
 const stuckLoading = (await page.locator("body").innerText()).includes("Loading case");
 check("switching to a role with no case access shows no error banner and no stuck loading state",
   bannerText === "" && !stuckLoading, `banner="${bannerText}" stuckLoading=${stuckLoading}`);
-const policyRows = () => page.locator("[data-testid=policy-panel] tbody tr", { hasText: /policy-\d+/ }).count();
-const before = await policyRows();
+// A policy row is one whose FIRST cell is a version. (The empty-state message also contains "policy-0", so
+// matching the row's whole text miscounts it as a policy when there are none, e.g. on a fresh demo.)
+const policyRowCount = () => page.evaluate(() =>
+  [...document.querySelectorAll("[data-testid=policy-panel] tbody tr")]
+    .filter((r) => /^policy-\d+/.test(r.querySelector("td")?.textContent?.trim() ?? "")).length);
+const before = await policyRowCount();
+// Preview before proposing: an amount rule of 1 sends every approval to a person.
+await page.fill("[aria-label='Always review amounts from']", "1");
+await page.getByRole("button", { name: "Preview impact" }).click();
+await page.waitForSelector("[data-testid=policy-preview]");
+const previewText = await text("[data-testid=policy-preview]");
+check("a preview shows the change in review volume against the policy in force",
+  /Review volume \d+ → \d+/.test(previewText) && /compared with policy-\d+, the policy in force/.test(previewText), previewText.slice(0, 110));
+check("the preview says what it does not tell you", /does not predict analyst decisions/.test(previewText));
+await page.locator("[data-testid=policy-panel]").screenshot({ path: "screenshots/10-policy-preview.png" });
+await page.fill("[aria-label='Always review amounts from']", "");
+check("editing the form clears a stale preview", (await page.locator("[data-testid=policy-preview]").count()) === 0);
 await page.selectOption("[aria-label='Data-quality gate action']", "hold");
 await page.getByRole("button", { name: "Propose policy" }).click();
-await page.waitForFunction((n) => [...document.querySelectorAll("[data-testid=policy-panel] tbody tr")].filter((r) => /policy-\d+/.test(r.textContent)).length > n, before);
+await page.waitForFunction((n) => [...document.querySelectorAll("[data-testid=policy-panel] tbody tr")]
+  .filter((r) => /^policy-\d+/.test(r.querySelector("td")?.textContent?.trim() ?? "")).length > n, before);
 const pending = page.locator("[data-testid=policy-panel] tbody tr", { hasText: "Awaiting approval" }).first();
 check("a proposed policy is awaiting approval", (await pending.count()) === 1, (await pending.innerText()).replace(/\s+/g, " ").slice(0, 100));
 check("the proposer has no Approve button", (await page.getByRole("button", { name: "Approve" }).count()) === 0);
