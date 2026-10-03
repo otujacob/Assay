@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(not os.environ.get("ASSAY_TEST_DATABASE_URL"),
                                 reason="ASSAY_TEST_DATABASE_URL not set")
 
 TENANT = "tenant-synth"
-SECRETS = {"ing": b"s1", "aud": b"s2"}
+SECRETS = {"ing": b"s1", "aud": b"s2", "other": b"s3"}
 
 
 @pytest.fixture(scope="module")
@@ -69,7 +69,10 @@ def env(pg_conn, trained, artefact):
             yield ScoringService(PostgresRepository(conn), reg, ScoringConfig(clock=lambda: fixed))
 
     creds = Credentials([Credential("ing", TENANT, SECRETS["ing"], frozenset({"ingest"})),
-                         Credential("aud", TENANT, SECRETS["aud"], frozenset({"auditor", "analyst"}))])
+                         Credential("aud", TENANT, SECRETS["aud"], frozenset({"auditor", "analyst"})),
+                         # another tenant, holding every role that could read: only isolation can stop it
+                         Credential("other", "tenant-other", SECRETS["other"],
+                                    frozenset({"auditor", "analyst", "manager", "senior_analyst", "admin", "approver"}))])
     client = TestClient(create_app(ingest_provider, creds, scoring=scoring_provider))
 
     def call(method, path, key, payload=None):
@@ -107,3 +110,20 @@ def test_concurrent_posts_of_one_transaction_produce_exactly_one_decision(env):
         assert len(reader.rows(TENANT, table)) == 1, table
         assert reader.verify(TENANT, table) is None, table
     assert len(reader.rows(TENANT, "transactions")) == 1
+
+
+def test_another_tenant_cannot_reach_a_decision_through_the_database_roles(env):
+    """The same attack as test_cross_tenant_api, against real PostgreSQL as the restricted application role,
+    so it is row-level security, not application code, that has to refuse."""
+    d = env["call"]("POST", "/v1/transactions", "ing", env["txn"]).json()["decision"]
+    did, call = d["decision_id"], env["call"]
+    assert call("GET", f"/v1/decisions/{did}", "aud").status_code == 200           # the owner can
+    for method, path in (("GET", f"/v1/decisions/{did}"), ("GET", f"/v1/decisions/{did}/explanation"),
+                         ("GET", f"/v1/decisions/{did}/lineage"), ("POST", f"/v1/decisions/{did}/replay")):
+        r = call(method, path, "other")
+        assert r.status_code == 404 and did not in json.dumps(r.json().get("detail", "")), (path, r.status_code, r.text)
+    for path in ("/v1/audit/export?limit=5000", "/v1/config/policies", "/v1/models/bundles"):
+        r = call("GET", path, "other")
+        assert r.status_code == 200 and d["txn_id"] not in r.text and did not in r.text, path
+    assert call("GET", "/v1/audit/export?limit=5000", "other").json()["items"][0]["actor"] == "api:other"  # B only sees B
+    assert env["reader"].verify(TENANT, "audit_log") is None

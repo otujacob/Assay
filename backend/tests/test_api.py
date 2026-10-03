@@ -47,9 +47,12 @@ def test_bad_credentials_rejected_identically(env, kw):
     assert repo.rows("A", "transactions") == []
 
 
-def test_missing_headers_rejected(env):
+def test_missing_credentials_are_a_401(env):
+    """No credentials is unauthenticated (401), not a malformed request (422). The body says no more."""
     c, _ = env
-    assert c.post("/v1/transactions", json=TXN).status_code == 422
+    r = c.post("/v1/transactions", json=TXN)
+    assert r.status_code == 401 and r.json()["detail"] == {"code": "unauthorized"}
+    assert c.post("/v1/transactions", json=TXN, headers={"X-Assay-Key": "k1"}).status_code == 401  # half a credential
 
 
 def test_idempotent_resend_over_api(env):

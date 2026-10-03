@@ -12,6 +12,14 @@ Configuration comes from the environment:
                             opens sealed bundles (FR-41). Production should use a managed key service
                             behind the same assay.crypto.KeyProvider interface instead.
   ASSAY_REQUIRE_ENCRYPTED_BUNDLES   "1" refuses any bundle that is not sealed with the tenant key.
+  ASSAY_OIDC_ISSUER, ASSAY_OIDC_AUDIENCE, ASSAY_OIDC_JWKS_URL   turn on single sign-on (FR-42): people
+                            present an OpenID Connect bearer token from the institution's provider.
+                            ASSAY_OIDC_ROLE_MAP is JSON mapping the provider's groups to Assay roles,
+                            e.g. {"fraud-analysts": "analyst"}. Optional: ASSAY_OIDC_TENANT_CLAIM
+                            (default assay_tenant), ASSAY_OIDC_ROLES_CLAIM (default groups),
+                            ASSAY_OIDC_MFA_ACR (comma-separated acr values accepted as MFA),
+                            ASSAY_OIDC_MAX_TOKEN_AGE_S (default 3600). MFA is required unless
+                            ASSAY_OIDC_REQUIRE_MFA=0, which exists for testing and should not be used.
 Without ASSAY_BUNDLES the server runs ingestion only.
 """
 
@@ -73,6 +81,27 @@ def key_provider_from_env():
     return LocalKeyProvider(master.encode())
 
 
+def oidc_from_env():
+    """The single sign-on verifier if ASSAY_OIDC_ISSUER is set, else None. Needs `pip install .[sso]`."""
+    issuer = os.environ.get("ASSAY_OIDC_ISSUER")
+    if not issuer:
+        return None
+    from assay.auth import HttpJwks, OidcConfig, OidcVerifier
+
+    missing = [k for k in ("ASSAY_OIDC_AUDIENCE", "ASSAY_OIDC_JWKS_URL", "ASSAY_OIDC_ROLE_MAP") if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(f"single sign-on is on (ASSAY_OIDC_ISSUER) but {', '.join(missing)} is not set")
+    cfg = OidcConfig(
+        issuer=issuer, audience=os.environ["ASSAY_OIDC_AUDIENCE"],
+        tenant_claim=os.environ.get("ASSAY_OIDC_TENANT_CLAIM", "assay_tenant"),
+        roles_claim=os.environ.get("ASSAY_OIDC_ROLES_CLAIM", "groups"),
+        role_map=json.loads(os.environ["ASSAY_OIDC_ROLE_MAP"]),
+        require_mfa=os.environ.get("ASSAY_OIDC_REQUIRE_MFA", "1") != "0",
+        mfa_acr_values=frozenset(v for v in os.environ.get("ASSAY_OIDC_MFA_ACR", "").split(",") if v),
+        max_token_age_s=int(os.environ.get("ASSAY_OIDC_MAX_TOKEN_AGE_S", "3600")))
+    return OidcVerifier(cfg, HttpJwks(os.environ["ASSAY_OIDC_JWKS_URL"]))
+
+
 def load_registry(specs: list[dict], key: bytes, provider=None,
                   require_encryption: bool | None = None) -> BundleRegistry:
     if require_encryption is None:
@@ -112,7 +141,8 @@ def build_app():
                                  os.environ["ASSAY_BUNDLE_SIGNING_KEY"].encode(), key_provider_from_env())
         scoring = make_scoring_provider(pool, registry)
         review = make_review_provider(pool, registry)
-    return create_app(make_provider(pool), Credentials(creds), scoring=scoring, review=review)
+    return create_app(make_provider(pool), Credentials(creds), scoring=scoring, review=review,
+                      key_provider=key_provider_from_env(), oidc=oidc_from_env())
 
 
 def __getattr__(name: str):

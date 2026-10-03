@@ -26,7 +26,8 @@ backend/src/assay/
   api/         FastAPI app (signed requests, roles) and server entry point
   lineage/     hash chain used for tamper evidence
   audit/       read-only audit search and CSV/JSON export (FR-34)
-  crypto/      per-tenant envelope encryption and key rotation for model bundles (FR-41)
+  crypto/      per-tenant envelope encryption and key rotation for model bundles and audit exports (FR-41)
+  auth/        OpenID Connect bearer-token verification for single sign-on, with MFA (FR-42)
   worker.py    background worker: explanation refinement and the population drift job
 backend/scripts/   run_validation.py, demo_server.py
 db/migrations/     0001..0006: tables, row-level security, append-only triggers, hash chains
@@ -107,7 +108,7 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | E6 Feedback capture | decisions, blind flag, checklist, shadow scores AAS/FCS/LVS/CRS/FQS: done. Nothing trains on them |
 | E7 Validation harness and dashboard | baselines B1 to B4, ablations, four accuracy measures, stress tests, stored reports, dashboard summary: done |
 | E8 Lineage completion | every decision step is an append-only record; replay reproduces decisions; audit-log search and CSV/JSON export (FR-34) with an auditor UI panel: done (tested on the in-memory store; the PostgreSQL path is unexercised) |
-| E9 Security and tenancy | tenant isolation, signed requests, roles, non-superuser enforcement, rate limiting, access events in the audit log (FR-43), CI secret and dependency scans (FR-44): done. Per-tenant encryption (FR-41): model bundles only, with a local key provider ([docs/security/key-management.md](docs/security/key-management.md)). SSO, MFA, a managed key service, encrypted exports, penetration test: **not done** |
+| E9 Security and tenancy | tenant isolation, signed requests, roles, non-superuser enforcement, rate limiting, access events in the audit log (FR-43), CI secret and dependency scans (FR-44): done. Per-tenant encryption (FR-41): model bundles and audit exports, with a local key provider ([docs/security/key-management.md](docs/security/key-management.md)). Single sign-on and MFA (FR-42): token verification built and tested with generated tokens, **not tested against a real identity provider**, and the web app has no sign-in flow yet ([docs/security/sso.md](docs/security/sso.md)). A managed key service, SAML, the independent penetration test: **not done** |
 | Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs, policy proposal and approval, auditor log: done. 73 unit tests; the browser end-to-end check (`web/scripts/e2e.mjs`) has not been rerun since the policy and audit panels were added |
 
 ## What the validation found
@@ -120,7 +121,7 @@ value on this data. Details, five method changes made along the way, and the lim
 
 ## Known gaps
 - **No real data, no pilot.** All evidence is synthetic. Real validation needs a pilot institution.
-- **Security and compliance.** No SSO/MFA, managed key service, encrypted exports, penetration test, or legal review
+- **Security and compliance.** No browser sign-in or real identity-provider test, managed key service, penetration test, or legal review
   (UK data protection, FCA/PRA expectations). Gate 1 cannot be passed yet.
 - **CI has not run on GitHub** (written, unverified there).
 - **Explanation cost.** About 27 ms per case, so real-time explanation testing of every case is
@@ -130,8 +131,6 @@ value on this data. Details, five method changes made along the way, and the lim
 - **Population drift job** runs in that worker. It skips a window of fewer than 100 rows or under
   24 hours (a short window false-alarms on time-of-day features), so a quiet tenant has no drift
   signal and scoring treats drift as zero. Window and alarm level are parameters, not tuned values.
-- **Dev-tool advisories.** `npm audit` reports advisories in Vite 5 and Vitest 2 (dev server and
-  test runner only, not the built app). CI gates production dependencies only until those are upgraded.
 - **API rate limit** is per process, not shared across workers.
 - **Institution hard rules** (sanctions holds) have a hook but no rule source.
 - **Analyst reason codes** are working defaults, not agreed with a fraud-operations adviser.

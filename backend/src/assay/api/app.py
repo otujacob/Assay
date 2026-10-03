@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 
 from assay import audit
 from assay.api.limits import RateLimiter
+from assay.auth import AuthError
 from assay.ingestion import IngestionService
 from assay.policy import PolicyError, PolicyService
 from assay.review.service import ReviewError, ReviewService
@@ -88,7 +89,14 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
                scoring: ScoringService | ScoringProvider | None = None,
                review: ReviewService | ReviewProvider | None = None,
                rate_limit_per_minute: int | None = DEFAULT_RATE_LIMIT,
-               clock: Callable[[], float] = time.monotonic) -> FastAPI:
+               clock: Callable[[], float] = time.monotonic,
+               key_provider=None, oidc=None) -> FastAPI:
+    """`key_provider` (an assay.crypto KeyProvider) lets audit exports be sealed with the tenant's
+    key (FR-41). Without one, a request for a sealed export is refused rather than sent in the clear.
+
+    `oidc` (an assay.auth.OidcVerifier) lets people sign in with the institution's identity provider
+    (FR-42): they send `Authorization: Bearer <token>` instead of a signed request. Service callers
+    keep using signed requests. Without `oidc`, bearer tokens are refused."""
     provider = _as_provider(service, IngestionService)
     scorer = _as_provider(scoring, ScoringService)
     reviewer = _as_provider(review, ReviewService)
@@ -114,11 +122,39 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         except Exception:
             log.exception("could not write audit event %s for %s", action, cred.key_id)
 
-    async def authed(request: Request, x_assay_key: str = Header(...),
-                     x_assay_signature: str = Header(...)) -> tuple[Credential, bytes]:
+    def bearer_credential(authorization: str, route: str) -> Credential:
+        """A person signed in through the identity provider. Anything wrong with the token is a 401
+        that says nothing about why, except that MFA is required (the person can act on that)."""
+        challenge = {"WWW-Authenticate": "Bearer"}
+        scheme, _, token = authorization.partition(" ")
+        if oidc is None or scheme.lower() != "bearer" or not token.strip():
+            log.warning("bearer token refused on %s: %s", route, "sso not configured" if oidc is None else "malformed header")
+            raise HTTPException(401, {"code": "unauthorized"}, headers=challenge)
+        try:
+            p = oidc.verify(token.strip())
+        except AuthError as e:
+            log.warning("bearer token refused on %s: %s", route, e.code)
+            if e.code == "mfa_required":
+                raise HTTPException(401, {"code": "mfa_required", "detail": "multi-factor authentication is required"},
+                                    headers=challenge) from None
+            raise HTTPException(401, {"code": "unauthorized"}, headers=challenge) from None
+        return Credential(f"sso-{p.subject}", p.tenant_id, b"", p.roles)
+
+    async def authed(request: Request, x_assay_key: str | None = Header(None),
+                     x_assay_signature: str | None = Header(None),
+                     authorization: str | None = Header(None)) -> tuple[Credential, bytes]:
         body = await request.body()
-        cred = credentials.get(x_assay_key)
         route = getattr(request.scope.get("route"), "path", request.url.path)
+        if authorization is not None:
+            cred = bearer_credential(authorization, route)
+            wait = limiter.check(cred.key_id) if limiter else None
+            if wait is not None:
+                raise HTTPException(429, {"code": "rate_limited"}, headers={"Retry-After": str(math.ceil(wait))})
+            route_of.set(route)
+            return cred, body
+        if x_assay_key is None or x_assay_signature is None:
+            raise HTTPException(401, {"code": "unauthorized"})
+        cred = credentials.get(x_assay_key)
         # Same response for unknown key and bad signature: don't reveal which keys exist.
         if cred is None:
             log.warning("authentication failed: unknown key id on %s", route)
@@ -260,12 +296,17 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
     def audit_export(format: str = "json", txn_id: str | None = None, actor: str | None = None,
                      action: str | None = None, model_version: str | None = None,
                      since: str | None = None, until: str | None = None, limit: int = 500,
-                     auth=Depends(authed)):
-        """Read-only audit search and export (FR-34). Auditors only; the read is itself logged."""
+                     seal: bool = False, auth=Depends(authed)):
+        """Read-only audit search and export (FR-34). Auditors only; the read is itself logged.
+        With seal=true the export is returned encrypted with the tenant's key (FR-41), so a copy
+        that leaves the system is unreadable without that key."""
         cred, _ = auth
         need(cred, "auditor")
         if format not in ("json", "csv"):
             raise HTTPException(422, {"code": "bad_format", "allowed": ["json", "csv"]})
+        if seal and key_provider is None:
+            raise HTTPException(409, {"code": "sealing_unavailable",
+                                      "detail": "no key provider is configured, so the export cannot be sealed"})
         try:
             lo = datetime.fromisoformat(since) if since else None
             hi = datetime.fromisoformat(until) if until else None
@@ -274,6 +315,13 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         out = with_scoring(cred, lambda sc: sc.audit_log(
             cred.tenant_id, f"api:{cred.key_id}", txn_id=txn_id, actor=actor, action=action,
             model_version=model_version, since=lo, until=hi, limit=limit))
+        if seal:
+            from assay.crypto import seal as seal_bytes
+
+            body = audit.to_csv(out["items"]).encode() if format == "csv" else json.dumps(out, default=str).encode()
+            return Response(seal_bytes(key_provider, cred.tenant_id, body, audit.SEAL_CONTEXT),
+                            media_type="application/octet-stream", headers={
+                                "Content-Disposition": f'attachment; filename="assay-audit.{format}.sealed"'})
         if format == "csv":
             return Response(audit.to_csv(out["items"]), media_type="text/csv", headers={
                 "Content-Disposition": 'attachment; filename="assay-audit.csv"'})

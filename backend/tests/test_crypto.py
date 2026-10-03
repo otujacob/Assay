@@ -19,6 +19,7 @@ from assay.detection import BundleError, load_bundle, rewrap_bundle, save_bundle
 from assay.detection.bundle import _write_manifest
 
 MASTER = b"m" * 32
+CSV_BYTES = b"seq,time" + bytes([10]) + b"1,now" + bytes([10])  # no backslashes
 A, B = "tenant-a", "tenant-b"
 SIGN = b"signing-key"
 
@@ -268,3 +269,118 @@ def test_an_interrupted_rewrap_is_recovered_by_running_it_again(tmp_path, kp, tr
     assert load_bundle(d, A, SIGN, decrypt_with=kp)[1].encrypted
     assert [p.name for p in d.iterdir() if p.suffix in (".tmp", ".prev")] == []
     assert real_manifest is bmod._write_manifest
+
+
+# -- sealed audit exports (API) and the command-line tool ---------------------------------------------------
+def _audit_api(kp, tenant="tenant-a"):
+    import json as _json
+    from datetime import UTC, datetime
+
+    from fastapi.testclient import TestClient
+
+    from assay.api import Credential, Credentials, create_app, sign
+    from assay.ingestion import IngestionService, InMemoryRepository
+    from assay.scoring import BundleRegistry, ScoringService
+
+    repo = InMemoryRepository()
+    now = datetime.now(UTC)
+    repo.append_audit(tenant, "u:alice", "policy_propose", "policy-1", "pending", now)
+    repo.append_audit(tenant, "u:bob", "=hostile-formula", "-", "ok", now)
+    creds = Credentials([Credential("aud", tenant, b"aud-secret", frozenset({"auditor"})),
+                         Credential("ana", tenant, b"ana-secret", frozenset({"analyst"}))])
+    app = create_app(IngestionService(repo), creds, scoring=ScoringService(repo, BundleRegistry()), key_provider=kp)
+    c = TestClient(app)
+
+    def call(path, key="aud"):
+        sec = {"aud": b"aud-secret", "ana": b"ana-secret"}[key]
+        return c.get(path, headers={"X-Assay-Key": key, "X-Assay-Signature": sign(sec, b"")})
+
+    return call, _json
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+def test_a_sealed_audit_export_is_unreadable_without_the_key_and_opens_with_it(kp, fmt):
+    call, _json = _audit_api(kp)
+    r = call(f"/v1/audit/export?format={fmt}&seal=true")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/octet-stream"
+    assert r.headers["content-disposition"] == f'attachment; filename="assay-audit.{fmt}.sealed"'
+    assert b"policy_propose" not in r.content and b"u:alice" not in r.content  # nothing readable in the file
+    plain = open_sealed(kp, "tenant-a", r.content, "audit-export")
+    assert b"policy_propose" in plain and b"u:alice" in plain
+    if fmt == "json":
+        assert _json.loads(plain)["chain_ok"] is True
+
+
+def test_a_sealed_export_is_bound_to_its_tenant_and_to_being_an_export(kp):
+    call, _ = _audit_api(kp)
+    blob = call("/v1/audit/export?seal=true").content
+    with pytest.raises(CryptoError):
+        open_sealed(kp, "tenant-b", blob, "audit-export")        # another tenant's key does not open it
+    with pytest.raises(CryptoError):
+        open_sealed(kp, "tenant-a", blob, "bundle|b-1")          # and it is not a bundle artifact
+    with pytest.raises(CryptoError):
+        open_sealed(LocalKeyProvider(b"x" * 32), "tenant-a", blob, "audit-export")
+
+
+def test_sealing_is_refused_not_downgraded_when_no_key_provider_is_configured():
+    call, _ = _audit_api(None)
+    r = call("/v1/audit/export?seal=true")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "sealing_unavailable"
+    assert call("/v1/audit/export").status_code == 200           # an unsealed export still works
+
+
+def test_sealing_does_not_widen_who_may_export(kp):
+    call, _ = _audit_api(kp)
+    assert call("/v1/audit/export?seal=true", key="ana").status_code == 403
+
+
+def test_reading_a_sealed_export_is_itself_audited(kp):
+    call, _ = _audit_api(kp)
+    call("/v1/audit/export?seal=true")
+    actions = call("/v1/audit/export?action=audit_read").json()["items"]
+    assert actions and actions[0]["actor"] == "api:aud"
+
+
+def test_the_cli_opens_a_sealed_export_and_refuses_the_wrong_tenant(tmp_path, kp, capsysbinary):
+    from assay.crypto.__main__ import main
+
+    env = {"ASSAY_MASTER_KEY": MASTER.decode()}
+    f = tmp_path / "x.csv.sealed"
+    f.write_bytes(seal(kp, A, CSV_BYTES, "audit-export"))
+    assert main(["open", str(f), "--tenant", A], env) == 0
+    assert capsysbinary.readouterr().out == CSV_BYTES
+    out = tmp_path / "x.csv"
+    assert main(["open", str(f), "--tenant", A, "-o", str(out)], env) == 0 and out.read_bytes() == CSV_BYTES
+    assert main(["open", str(f), "--tenant", A, "-o", str(out)], env) == 1       # will not overwrite silently
+    assert main(["open", str(f), "--tenant", A, "-o", str(out), "--force"], env) == 0
+    assert main(["open", str(f), "--tenant", B], env) == 1                       # wrong tenant
+    assert main(["open", str(f), "--tenant", A, "--context", "bundle|b"], env) == 1
+
+
+def test_the_cli_fails_cleanly_without_a_key_or_file(tmp_path, kp, capsys):
+    from assay.crypto.__main__ import main
+
+    f = tmp_path / "x.sealed"
+    f.write_bytes(seal(kp, A, b"x", "audit-export"))
+    assert main(["open", str(f), "--tenant", A], {}) == 1
+    assert "ASSAY_MASTER_KEY is not set" in capsys.readouterr().err
+    assert main(["open", str(tmp_path / "missing"), "--tenant", A], {"ASSAY_MASTER_KEY": MASTER.decode()}) == 1
+    f.write_bytes(b"this is not a sealed file at all" * 5)
+    assert main(["open", str(f), "--tenant", A], {"ASSAY_MASTER_KEY": MASTER.decode()}) == 1
+    assert "not a sealed blob" in capsys.readouterr().err
+
+
+def test_the_cli_rewraps_a_file_to_a_newer_key_version(tmp_path, kp, capsys):
+    from assay.crypto.__main__ import main
+
+    env = {"ASSAY_MASTER_KEY": MASTER.decode()}
+    f = tmp_path / "x.sealed"
+    f.write_bytes(seal(kp, A, b"keep", "audit-export"))
+    assert key_version(f.read_bytes()) == 1
+    assert main(["rewrap", str(f), "--tenant", A, "--key-version", "2"], env) == 0
+    assert "from key version 1 to 2" in capsys.readouterr().out and key_version(f.read_bytes()) == 2
+    assert main(["rewrap", str(f), "--tenant", A, "--key-version", "2"], env) == 0
+    assert "already on key version 2" in capsys.readouterr().out
+    kp.rotate(A)
+    assert open_sealed(kp, A, f.read_bytes(), "audit-export") == b"keep" and not list(tmp_path.glob("*.tmp"))
+    assert main(["rewrap", str(f), "--tenant", B, "--key-version", "2"], env) == 1  # not another tenant's to rewrap

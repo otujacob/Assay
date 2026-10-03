@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 
 from assay.ingestion.repo import _to_dt
 
+# Bound into the encryption of a sealed export, so it will not open as anything else (FR-41).
+SEAL_CONTEXT = "audit-export"
 FIELDS = ("seq", "time", "actor", "action", "object", "result", "row_hash")
 MAX_LIMIT = 5000
 

@@ -9,12 +9,13 @@ assessment has been done (PRD Gate 1).
 |---|---|---|
 | Model bundle artefacts | Sealed per tenant with AES-256-GCM envelope encryption (`assay.crypto`) | `backend/tests/test_crypto.py` |
 | PostgreSQL data and backups | **Not done by this code.** A deployment setting on the managed database (storage encryption) | The hosting platform's configuration |
-| Audit exports, datasets, reports in object storage | **Not done yet.** Per-tenant sealing of exports is not wired in | Open item |
+| Audit exports | Sealed per tenant on request (`?seal=true`), opened with the command-line tool below | `backend/tests/test_crypto.py` |
+| Datasets and validation reports | **Not done yet.** They are not written to object storage by this code, so there is nothing to seal; if they are, they need the same treatment | Open item |
 | Traffic | TLS, and mutual TLS between services: a deployment setting | Not built here |
 
-The claim "all stores encrypted, per-tenant keys" (PRD 16) is therefore **only partly met**: the
-model artefacts are sealed per tenant, and the rest depends on deployment settings and is not yet
-wired for exports.
+The claim "all stores encrypted, per-tenant keys" (PRD 16) is therefore **only partly met**: model
+artefacts and audit exports can be sealed per tenant, and the rest (database, backups, traffic)
+depends on deployment settings.
 
 ## How it works
 
@@ -34,6 +35,23 @@ decrypted or deserialised.
 than the PRD intends (a separate key per tenant in a managed key service). Production should
 implement the `KeyProvider` protocol over a managed key service (OPD-21 decides which), so a KEK
 never leaves the service. Nothing else in the application changes.
+
+## Sealed audit exports
+
+`GET /v1/audit/export?seal=true` (auditors only, as for any export) returns the file encrypted with
+the tenant's key, as `assay-audit.csv.sealed` or `assay-audit.json.sealed`. If no key provider is
+configured the request is **refused with 409**, never answered in the clear. Reading the log is
+audited either way. A sealed export opens only for the tenant it was made for, and only as an
+audit export.
+
+To open one, on a machine that holds the master secret:
+```
+python -m assay.crypto open assay-audit.csv.sealed --tenant tenant-a -o assay-audit.csv
+```
+It will not overwrite an existing file without `--force`. After a rotation, bring an old export to the
+current key with `python -m assay.crypto rewrap FILE --tenant T --key-version N`, then revoke the old
+version. Anyone who can run the tool with the master secret can open every tenant's exports, so
+treat it like the secret itself.
 
 ## Starting up
 
