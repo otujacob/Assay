@@ -25,6 +25,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # A fresh runner has an old pip, and pip-audit flags pip itself. Upgrade it first, so the audit
+      # below is about the project's dependencies.
+      - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,db,crypto]"
       - run: ruff check .
       - run: pytest -q

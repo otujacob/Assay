@@ -3,11 +3,19 @@ name = "assay"
 version = "0.1.0"
 description = "Assay: fraud decision intelligence with the Adaptive Trust Calibration Engine"
 requires-python = ">=3.11"
-dependencies = ["numpy>=2", "pydantic>=2", "fastapi>=0.110"]
+dependencies = [
+  "numpy>=2",
+  "pydantic>=2",
+  "fastapi>=0.110",
+  "scikit-learn>=1.5",  # calibration, random forest, isolation forest
+  "xgboost>=2.1",       # the detection ensemble and TreeSHAP attributions
+  "joblib>=1.4",        # model bundle serialisation (verified before loading)
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.6", "httpx>=0.27", "pglast>=7"]
-db = ["psycopg[binary]>=3.2"]
+db = ["psycopg[binary]>=3.2", "psycopg-pool>=3.2"]  # PostgreSQL storage and the pooled API server
+server = ["uvicorn>=0.30", "httpx>=0.27"]  # `uvicorn assay.api.main:app` and the demo server
 crypto = ["cryptography>=43"]  # per-tenant envelope encryption of model bundles (FR-41)
 
 [build-system]
