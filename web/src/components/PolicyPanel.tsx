@@ -9,6 +9,19 @@ const DQ_LABEL: Record<string, string> = {
   hold: "Hold the transaction",
 };
 
+/** When an approved policy takes effect: the later of its effective date and its approval time (the server's rule). */
+const takesEffect = (p: PolicyVersion): number =>
+  Math.max(Date.parse(p.effective_from), p.approved_at ? Date.parse(p.approved_at) : Infinity);
+
+/** The approved policy in force at `now`; of several, the one that took effect last (the newest wins a tie). */
+export function inForce(items: PolicyVersion[], now: number = Date.now()): PolicyVersion | undefined {
+  let best: PolicyVersion | undefined;
+  for (const p of [...items].reverse()) { // the list is newest first, so walk oldest to newest
+    if (p.status === "approved" && takesEffect(p) <= now && (!best || takesEffect(p) >= takesEffect(best))) best = p;
+  }
+  return best;
+}
+
 /** Decision policies (PRD 10.4, FR-21): one person proposes, a different person approves. */
 export function PolicyPanel({ userKey, roles }: { userKey: string; roles: ReadonlySet<string> }) {
   const [items, setItems] = useState<PolicyVersion[] | null>(null);
@@ -46,7 +59,7 @@ export function PolicyPanel({ userKey, roles }: { userKey: string; roles: Readon
     }
   };
 
-  const active = items?.find((p) => p.status === "approved");
+  const active = items ? inForce(items) : undefined;
 
   return (
     <div className="panel" data-testid="policy-panel">
@@ -93,9 +106,12 @@ export function PolicyPanel({ userKey, roles }: { userKey: string; roles: Readon
                   <td className="mono">{formatTime(p.effective_from)}</td>
                   <td className="mono">{p.proposed_by}</td>
                   <td>
-                    {p.status === "approved"
-                      ? <Pill tone="green" title={p.approved_at ?? undefined}>Approved by {p.approved_by}</Pill>
-                      : <Pill tone="amber">Awaiting approval</Pill>}
+                    {p.status === "pending"
+                      ? <Pill tone="amber">Awaiting approval</Pill>
+                      : <>
+                          <Pill tone="green" title={p.approved_at ?? undefined}>Approved by {p.approved_by}</Pill>
+                          {takesEffect(p) > Date.now() && <> <Pill tone="blue">Scheduled</Pill></>}
+                        </>}
                   </td>
                   <td className="right">
                     {p.status === "pending" && canApprove && (

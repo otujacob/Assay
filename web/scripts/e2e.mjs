@@ -85,6 +85,62 @@ check("the validation verdict is shown as NOT supported", /Not supported as spec
 await page.getByRole("tab", { name: "Model Bundle & Lineage" }).click();
 check("bundle lineage shows the signed artefact hash", /Artefact SHA-256/.test(await text("[data-testid=bundle-card]")));
 
+// --- decision policies: propose, then a DIFFERENT person approves (FR-21) -------------------------------------------
+await user("analyst");
+await page.waitForSelector("[data-testid=case-details]");
+check("an analyst sees neither the policy panel nor the audit log",
+  (await page.locator("[data-testid=policy-panel]").count()) === 0 && (await page.locator("[data-testid=audit-log]").count()) === 0);
+
+await user("admin");
+await page.waitForSelector("[data-testid=policy-panel]");
+const before = await page.locator("[data-testid=policy-panel] tbody tr:has(td.mono)").count();
+await page.selectOption("[aria-label='Data-quality gate action']", "hold");
+await page.getByRole("button", { name: "Propose policy" }).click();
+await page.waitForFunction((n) => document.querySelectorAll("[data-testid=policy-panel] tbody tr td.mono").length > n * 4, before);
+const pending = page.locator("[data-testid=policy-panel] tbody tr", { hasText: "Awaiting approval" }).first();
+check("a proposed policy is awaiting approval", (await pending.count()) === 1, (await pending.innerText()).replace(/\s+/g, " ").slice(0, 100));
+check("the proposer has no Approve button", (await page.getByRole("button", { name: "Approve" }).count()) === 0);
+await page.screenshot({ path: "screenshots/07-policy-proposed.png" });
+
+await user("approver");
+await page.waitForSelector("[data-testid=policy-panel]");
+await page.waitForTimeout(500);
+const awaiting = page.locator("[data-testid=policy-panel] tbody tr", { hasText: "Awaiting approval" }).first();
+const version = (await awaiting.locator("td").first().innerText()).trim();
+check("the approver sees an Approve button and no Propose form",
+  (await awaiting.getByRole("button", { name: "Approve" }).count()) === 1 && (await page.getByRole("button", { name: "Propose policy" }).count()) === 0, version);
+await awaiting.getByRole("button", { name: "Approve" }).click();
+await page.waitForSelector(`[data-testid=policy-panel] tbody tr:has-text("${version}"):has-text("Approved by u:approver")`);
+const inForce = await text("[data-testid=policy-panel] tbody tr:has-text('In force')");
+check("after approval the policy is in force", inForce.includes(version), inForce.slice(0, 80));
+await page.screenshot({ path: "screenshots/08-policy-approved.png" });
+
+// --- auditor: read-only policies, audit log with search and CSV export (FR-34, FR-43) ----------------------------
+await user("auditor");
+await page.waitForSelector("[data-testid=audit-log] tbody tr");
+check("the auditor sees the policy list but cannot act on it",
+  (await page.locator("[data-testid=policy-panel]").count()) === 1 &&
+  (await page.getByRole("button", { name: "Approve" }).count()) === 0 && (await page.getByRole("button", { name: "Propose policy" }).count()) === 0);
+const auditText = await text("[data-testid=audit-log]");
+check("the audit log shows the hash chain verified", /Hash chain verified/.test(auditText), auditText.slice(-90));
+await page.fill("[data-testid=audit-log] [aria-label='Action']", "policy_approve");
+await page.getByRole("button", { name: "Search" }).click();
+await page.waitForFunction(() => {
+  const rows = [...document.querySelectorAll("[data-testid=audit-log] tbody tr")];
+  return rows.length > 0 && rows.every((r) => r.textContent.includes("policy_approve"));
+});
+check("searching by action shows only that action", (await text("[data-testid=audit-log] tbody")).includes("u:approver"));
+const [download] = await Promise.all([
+  page.waitForEvent("download"),
+  page.getByRole("button", { name: "Export CSV" }).click(),
+]);
+const { readFileSync } = await import("node:fs");
+const csv = readFileSync(await download.path(), "utf8");
+check("the CSV export downloads with a header and the filtered rows",
+  download.suggestedFilename() === "assay-audit.csv" && csv.startsWith("seq,time,actor,action,object,result,row_hash") && csv.includes("policy_approve"),
+  csv.split("\n")[0]);
+await page.screenshot({ path: "screenshots/09-audit-log.png" });
+
 check("no uncaught page errors", pageErrors.length === 0, pageErrors.join(" | "));
 await browser.close();
 console.log(failed === 0 ? "\nALL END-TO-END CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import type { PolicyVersion } from "../types";
-import { PolicyPanel } from "./PolicyPanel";
+import { PolicyPanel, inForce } from "./PolicyPanel";
 
 const pv = (over: Partial<PolicyVersion> = {}): PolicyVersion => ({
   id: "p1", version: "policy-1", payload: { dq_gate_action: "hold", automation_level: 0 },
@@ -80,5 +80,38 @@ describe("PolicyPanel", () => {
     render(<PolicyPanel userKey="analyst" roles={roles("admin")} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load policies: forbidden");
     expect(screen.queryByText(/No policies yet/)).not.toBeInTheDocument();
+  });
+});
+
+describe("inForce", () => {
+  const approved = (version: string, effective: string, approvedAt: string): PolicyVersion =>
+    pv({ id: version, version, status: "approved", effective_from: effective, approved_at: approvedAt, approved_by: "u:x" });
+  const NOW = Date.parse("2026-10-10T00:00:00Z");
+
+  it("ignores pending policies and policies that take effect in the future", () => {
+    const items = [approved("policy-3", "2026-10-20T00:00:00Z", "2026-10-05T00:00:00Z"), pv({ version: "policy-2" }),
+                   approved("policy-1", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z")];
+    expect(inForce(items, NOW)?.version).toBe("policy-1");   // policy-3 is approved but scheduled
+    expect(inForce([items[1]], NOW)).toBeUndefined();        // nothing approved: the built-in default applies
+  });
+
+  it("uses the later of the effective date and the approval time", () => {
+    const backdated = approved("policy-2", "2026-09-01T00:00:00Z", "2026-10-08T00:00:00Z"); // took effect on approval
+    const earlier = approved("policy-1", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z");
+    expect(inForce([backdated, earlier], NOW)?.version).toBe("policy-2");
+  });
+
+  it("lets the newest policy win when two took effect at the same moment", () => {
+    const a = approved("policy-1", "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z");
+    const b = approved("policy-2", "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z");
+    expect(inForce([b, a], NOW)?.version).toBe("policy-2");  // the list is newest first
+  });
+
+  it("shows an approved but not yet effective policy as Scheduled, not In force", async () => {
+    const future = new Date(Date.now() + 7 * 864e5).toISOString();
+    vi.spyOn(api, "policies").mockResolvedValue({ items: [approved("policy-1", future, new Date().toISOString())] });
+    render(<PolicyPanel userKey="auditor" roles={roles("auditor")} />);
+    expect(await screen.findByText("Scheduled")).toBeInTheDocument();
+    expect(screen.queryByText("In force")).not.toBeInTheDocument();
   });
 });
