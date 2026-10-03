@@ -73,21 +73,23 @@ export function PolicyPanel({ userKey, roles }: { userKey: string; roles: Readon
       {error && <div className="banner-error" role="alert">{error}</div>}
 
       {canPropose && (
-        <form className="filters pad" onSubmit={(e) => {
+        <form className="filters filters-row" onSubmit={(e) => {
           e.preventDefault();
           void run(() => api.proposePolicy({
             dq_gate_action: dq, effective_from: from ? `${from}T00:00:00+00:00` : undefined,
           }));
         }}>
-          <label className="small">When data quality is below the floor{" "}
+          <label className="field-wide">When data quality is below the floor
             <select aria-label="Data-quality gate action" value={dq} onChange={(e) => setDq(e.target.value)}>
               {Object.entries(DQ_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
-          <label className="small">Effective from{" "}
+          <label>Effective from
             <input aria-label="Effective from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </label>
-          <button type="submit" disabled={busy}>Propose policy</button>
+          <div className="actions">
+            <button type="submit" className="btn primary" disabled={busy}>Propose policy</button>
+          </div>
         </form>
       )}
 
@@ -115,7 +117,7 @@ export function PolicyPanel({ userKey, roles }: { userKey: string; roles: Readon
                   </td>
                   <td className="right">
                     {p.status === "pending" && canApprove && (
-                      <button type="button" disabled={busy || own}
+                      <button type="button" className="btn ghost" disabled={busy || own}
                               title={own ? "You proposed this policy, so someone else must approve it" : undefined}
                               onClick={() => void run(() => api.approvePolicy(p.id))}>
                         Approve

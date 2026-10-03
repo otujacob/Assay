@@ -61,16 +61,28 @@ export function AuditLog() {
     <div className="panel" data-testid="audit-log">
       <div className="panel-head">
         <div className="panel-title">Audit Log</div>
-        <form className="filters" onSubmit={(e) => { e.preventDefault(); void load(form); }}>
-          <input aria-label="Transaction" className="search" placeholder="Transaction id" value={form.txn} onChange={set("txn")} />
-          <input aria-label="Actor" className="search" placeholder="Actor" value={form.actor} onChange={set("actor")} />
-          <input aria-label="Action" className="search" placeholder="Action" value={form.action} onChange={set("action")} />
-          <input aria-label="From date" type="date" value={form.from} onChange={set("from")} />
-          <input aria-label="To date" type="date" value={form.to} onChange={set("to")} />
-          <button type="submit">Search</button>
-          <button type="button" onClick={() => void exportCsv()}>Export CSV</button>
-        </form>
       </div>
+      <form className="filters filters-row" onSubmit={(e) => { e.preventDefault(); void load(form); }}>
+        <label className="field-wide">Transaction
+          <input aria-label="Transaction" className="search" value={form.txn} onChange={set("txn")} />
+        </label>
+        <label className="field-wide">Actor
+          <input aria-label="Actor" className="search" value={form.actor} onChange={set("actor")} />
+        </label>
+        <label className="field-wide">Action
+          <input aria-label="Action" className="search" value={form.action} onChange={set("action")} />
+        </label>
+        <label>From
+          <input aria-label="From date" type="date" value={form.from} onChange={set("from")} />
+        </label>
+        <label>To
+          <input aria-label="To date" type="date" value={form.to} onChange={set("to")} />
+        </label>
+        <div className="actions">
+          <button type="submit" className="btn primary">Search</button>
+          <button type="button" className="btn ghost" onClick={() => void exportCsv()}>Export CSV</button>
+        </div>
+      </form>
       {error && <div className="banner-error" role="alert">{error}</div>}
       <div className="table-wrap">
         <table className="queue">

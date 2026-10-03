@@ -13,6 +13,10 @@ import type {
 
 const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === "fulfilled" ? r.value : null);
 
+// A response belongs to the user who asked. If the demo user has changed since, it is dropped, so a
+// slow answer for the previous user cannot fill the new user's screen or open a case they may not see.
+const stale = (asked: string): boolean => getUser() !== asked;
+
 export default function App() {
   const [users, setUsers] = useState<DemoUser[]>([]);
   const [user, setUserState] = useState(getUser());
@@ -45,33 +49,41 @@ export default function App() {
   }, []);
 
   const loadQueue = useCallback(async (f: QueueFilterState) => {
+    const asked = getUser();
     try {
       const q = await api.queue({
         risk_band: f.risk, trust_state: f.trust, reason_code: f.reason, search: f.search,
       });
+      if (stale(asked)) return;
       fetchedAt.current = Date.now();
       setElapsed(0);
       setQueue(q);
       setError(null);
     } catch (e) {
+      if (stale(asked)) return;
       setQueue(null);
       setError(e instanceof ApiError && e.status === 403 ? null : `Could not load the queue: ${(e as Error).message}`);
     } finally {
-      setLoading(false);
+      if (!stale(asked)) setLoading(false);
     }
   }, []);
 
   const loadSide = useCallback(async () => {
+    const asked = getUser();
     const [d, r, b] = await Promise.allSettled([api.dashboard(), api.reports(), api.bundles()]);
+    if (stale(asked)) return;
     setDash(ok(d));
     setReport(ok(r)?.[0] ?? null);
     setBundle(ok(b)?.find((x) => x.champion) ?? ok(b)?.[0] ?? null);
   }, []);
 
   const loadCase = useCallback(async (id: string) => {
+    const asked = getUser();
     try {
-      setView(await api.getCase(id));
+      const v = await api.getCase(id);
+      if (!stale(asked)) setView(v);
     } catch (e) {
+      if (stale(asked)) return;
       setView(null);
       setError(`Could not load the case: ${(e as Error).message}`);
     }
@@ -81,6 +93,8 @@ export default function App() {
   useEffect(() => {
     if (!users.length) return;
     setLoading(true);
+    setError(null);
+    setQueue(null); // the previous user's queue must not survive: auto-select would open its first case as this user
     setSelectedId(null);
     setView(null);
     autoSelected.current = false;

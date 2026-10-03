@@ -157,6 +157,69 @@ describe("App", () => {
     await waitFor(() => expect(calls.some((c) => c.path.includes("risk_band=high") && c.path.includes("trust_state=low"))).toBe(true));
   });
 
+  it("ignores a slow response from the previous user after the demo user is switched", async () => {
+    // The analyst's queue is held back. The user switches to a role with no case access, and only
+    // then does the analyst's response arrive. It must not populate the new user's screen or open a case.
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+    const forbidden = () => json({ detail: { code: "forbidden", detail: "forbidden" } }, 403);
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = new URL(input, "http://x");
+      const user = ((init?.headers ?? {}) as Record<string, string>)["X-Demo-User"];
+      seen.push(`${user} ${url.pathname}`);
+      if (url.pathname === "/demo/users") {
+        return json([{ key: "analyst", label: "Analyst", roles: ["analyst"] }, { key: "admin", label: "Tenant Administrator", roles: ["admin"] }]);
+      }
+      if (user === "analyst" && url.pathname === "/api/review/queue") {
+        await held;
+        return json(queue().body);
+      }
+      if (user === "analyst" && url.pathname === "/api/review/cases/d-1") return json(caseView());
+      if (url.pathname === "/api/config/policies") return json({ items: [] });
+      return forbidden();
+    }));
+    render(<App />);
+    await waitFor(() => expect(seen).toContain("analyst /api/review/queue"));
+    fireEvent.change(screen.getByLabelText("Demo user"), { target: { value: "admin" } });
+    await screen.findByText("Your role does not include the review queue.");
+    release();
+    await new Promise((r) => setTimeout(r, 100)); // let the late response land
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading case…")).not.toBeInTheDocument();
+    expect(screen.getByText("Select a case from the queue.")).toBeInTheDocument();
+    expect(seen).not.toContain("admin /api/review/cases/d-1"); // the admin never asked for the analyst's case
+  });
+
+  it("does not open the previous user's case for a role that may not read cases", async () => {
+    // The analyst's queue has loaded and a case is open. Switching to a role with no review access must
+    // not carry that queue over, or the auto-select would fetch the analyst's case as the new user.
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = new URL(input, "http://x");
+      const user = ((init?.headers ?? {}) as Record<string, string>)["X-Demo-User"];
+      seen.push(`${user} ${url.pathname}`);
+      if (url.pathname === "/demo/users") {
+        return json([{ key: "analyst", label: "Analyst", roles: ["analyst"] }, { key: "admin", label: "Tenant Administrator", roles: ["admin"] }]);
+      }
+      if (user === "analyst" && url.pathname === "/api/review/queue") return json(queue().body);
+      if (user === "analyst" && url.pathname === "/api/review/cases/d-1") return json(caseView());
+      if (url.pathname === "/api/config/policies") return json({ items: [] });
+      return json({ detail: { code: "forbidden", detail: "forbidden" } }, 403);
+    }));
+    render(<App />);
+    expect(await screen.findByTestId("case-details")).toHaveTextContent("t-0001");
+    fireEvent.change(screen.getByLabelText("Demo user"), { target: { value: "admin" } });
+    await screen.findByText("Your role does not include the review queue.");
+    await new Promise((r) => setTimeout(r, 150));
+    expect(seen).not.toContain("admin /api/review/cases/d-1");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading case…")).not.toBeInTheDocument();
+    expect(screen.getByText("Select a case from the queue.")).toBeInTheDocument();
+  });
+
   it("returns to an empty state from Back to Queue", async () => {
     mockApi({
       "GET /demo/users": () => ({ body: USERS }),

@@ -93,14 +93,20 @@ check("an analyst sees neither the policy panel nor the audit log",
 
 await user("admin");
 await page.waitForSelector("[data-testid=policy-panel]");
-const before = await page.locator("[data-testid=policy-panel] tbody tr:has(td.mono)").count();
+await page.waitForTimeout(800); // let any late response from the previous user arrive
+const bannerText = (await page.locator(".banner-error").allInnerTexts()).join(" | ");
+const stuckLoading = (await page.locator("body").innerText()).includes("Loading case");
+check("switching to a role with no case access shows no error banner and no stuck loading state",
+  bannerText === "" && !stuckLoading, `banner="${bannerText}" stuckLoading=${stuckLoading}`);
+const policyRows = () => page.locator("[data-testid=policy-panel] tbody tr", { hasText: /policy-\d+/ }).count();
+const before = await policyRows();
 await page.selectOption("[aria-label='Data-quality gate action']", "hold");
 await page.getByRole("button", { name: "Propose policy" }).click();
-await page.waitForFunction((n) => document.querySelectorAll("[data-testid=policy-panel] tbody tr td.mono").length > n * 4, before);
+await page.waitForFunction((n) => [...document.querySelectorAll("[data-testid=policy-panel] tbody tr")].filter((r) => /policy-\d+/.test(r.textContent)).length > n, before);
 const pending = page.locator("[data-testid=policy-panel] tbody tr", { hasText: "Awaiting approval" }).first();
 check("a proposed policy is awaiting approval", (await pending.count()) === 1, (await pending.innerText()).replace(/\s+/g, " ").slice(0, 100));
 check("the proposer has no Approve button", (await page.getByRole("button", { name: "Approve" }).count()) === 0);
-await page.screenshot({ path: "screenshots/07-policy-proposed.png" });
+await page.locator("[data-testid=policy-panel]").screenshot({ path: "screenshots/07-policy-proposed.png" });
 
 await user("approver");
 await page.waitForSelector("[data-testid=policy-panel]");
@@ -113,7 +119,7 @@ await awaiting.getByRole("button", { name: "Approve" }).click();
 await page.waitForSelector(`[data-testid=policy-panel] tbody tr:has-text("${version}"):has-text("Approved by u:approver")`);
 const inForce = await text("[data-testid=policy-panel] tbody tr:has-text('In force')");
 check("after approval the policy is in force", inForce.includes(version), inForce.slice(0, 80));
-await page.screenshot({ path: "screenshots/08-policy-approved.png" });
+await page.locator("[data-testid=policy-panel]").screenshot({ path: "screenshots/08-policy-approved.png" });
 
 // --- auditor: read-only policies, audit log with search and CSV export (FR-34, FR-43) ----------------------------
 await user("auditor");
@@ -139,7 +145,7 @@ const csv = readFileSync(await download.path(), "utf8");
 check("the CSV export downloads with a header and the filtered rows",
   download.suggestedFilename() === "assay-audit.csv" && csv.startsWith("seq,time,actor,action,object,result,row_hash") && csv.includes("policy_approve"),
   csv.split("\n")[0]);
-await page.screenshot({ path: "screenshots/09-audit-log.png" });
+await page.locator("[data-testid=audit-log]").screenshot({ path: "screenshots/09-audit-log.png" });
 
 check("no uncaught page errors", pageErrors.length === 0, pageErrors.join(" | "));
 await browser.close();
