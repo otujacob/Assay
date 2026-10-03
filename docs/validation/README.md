@@ -12,6 +12,7 @@ python backend/scripts/run_validation.py --seed 99 --n 100000 --out docs/validat
 |---|---|---|---|
 | Seed 5 (development) | 3,891 | 57 (1.46%) | `seed-5-dev/` |
 | Seed 99 (fresh, not used to make design decisions) | 3,911 | 47 (1.20%) | `seed-99-fresh/` |
+| Twelve fresh seeds, 201 to 212 (a pre-set analysis, see below) | 46,327 | 1,384 (2.99%) | `multi-seed-201-212/` |
 
 Each folder has `report.md` (readable), `report.json` and `stress.json`.
 
@@ -35,7 +36,61 @@ What does hold on both seeds:
 - 70% to 82% of errors reach a human (Low trust or Insufficient evidence).
 - The Trust Index clearly beats the two simplest uncertainty baselines.
 
-## Component ablations (PRD 6.4)
+## Twelve-seed check: is the gap to B3 real? (added after the two-seed result)
+
+The two-seed result left one question open: the Trust Index was ahead of B3 (max class probability) on
+both seeds, but 47 to 57 errors per run is too few to tell a real advantage from noise. So the same
+harness was run on **twelve further seeds (201 to 212)**, none used for any design decision. Each
+seed is a separate synthetic dataset; the unit of analysis is the seed.
+
+**The decision rule was written before the runs** (it is in the docstring of
+`backend/scripts/validate_many_seeds.py`): the mean over seeds of AUROC(Trust Index) minus AUROC(B3),
+supported only if its 95% interval excludes zero on the positive side. Reproduce with:
+
+```
+python backend/scripts/validate_many_seeds.py run --seeds 201-212 --out multi
+python backend/scripts/validate_many_seeds.py summarise multi
+```
+
+| Trust Index minus | Mean AUROC difference | 95% interval over seeds | Ahead in |
+|---|---|---|---|
+| B1, distance from threshold | +0.124 | +0.090 to +0.157 | 12 of 12 |
+| B2, ensemble disagreement | +0.080 | +0.050 to +0.109 | 12 of 12 |
+| **B3, max class probability** | **+0.030** | **+0.009 to +0.051** | **9 of 12** |
+
+**By the pre-set rule, the Trust Index beats B3 on this synthetic data. That is a weak result, and it
+should be read as one.**
+- The advantage is small (+0.03 on an AUROC of 0.91), and its lower bound is only +0.009.
+- It is ahead in 9 of 12 seeds and behind in 3 (by 0.013, 0.009 and 0.001). A sign test across seeds
+  does not reach significance (p = 0.15). The interval over seeds does exclude zero, but that interval
+  assumes the per-seed differences are roughly normal, and there are only twelve of them.
+- Every seed shares one generator and one configuration, so these are not different worlds. They show
+  stability over sampling, not over kinds of fraud.
+- The Trust Index design was tuned on seeds 5 and 99, not on these. That makes this a fair test of the
+  design on new data. It is still synthetic data (PRD 28.3).
+
+What this changes: the earlier "inconclusive" reading was partly a power problem. With about 1,400
+errors instead of about 50, the Trust Index is ahead of B3 on average. What it does not change: nothing
+here says the Trust Index works on real fraud, and the PRD 6.6 criteria still have to be met on a pilot
+institution's matured outcomes.
+
+Component ablations over the twelve seeds (AUROC without the component minus with it; the rule is
+the same: entirely below zero means it helps, entirely above zero means it hurts):
+
+| Component | Mean change if removed | 95% interval | Reading |
+|---|---|---|---|
+| rel (cohort reliability) | -0.035 | -0.045 to -0.025 | **helps, a large effect.** Removing it hurt in 12 of 12 seeds |
+| conf (model confidence) | -0.009 | -0.014 to -0.005 | helps, small effect, 12 of 12 seeds |
+| exp (explanation reliability) | +0.002 | -0.001 to +0.005 | **no measurable value.** H3 stays unsupported, as on the first two seeds |
+| fam (familiarity) | +0.009 | +0.000 to +0.017 | removing it RAISES discrimination in 10 of 12 seeds, but the lower bound is +0.0004. Down-weighting is indicated, weakly (PRD 6.4, OPD-3) |
+| drift, dq | 0 | 0 | no effect in any seed: the data is clean and stationary, by construction |
+
+Two things follow. The score's discriminating power comes mostly from `rel`, so it is only as good as
+the matured outcomes behind it, which is exactly what a pilot would be short of at first. And `exp`,
+which is the most expensive component to compute, has not shown value on any synthetic run so far.
+That is a product decision for OPD-3 and OPD-7, and should be taken on data separate from this.
+
+## Component ablations (PRD 6.4), the first two seeds
 
 | Component | Seed 5 | Seed 99 | Reading |
 |---|---|---|---|

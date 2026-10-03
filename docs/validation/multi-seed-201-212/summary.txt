@@ -1,0 +1,17 @@
+Seeds: 12 (201 to 212); cases 46,327; wrong recommendations 1,384
+Mean AUROC of the Trust Index at ranking errors: 0.910
+
+Trust Index minus each baseline (AUROC), mean over seeds, 95% interval over seeds:
+  B1_distance_from_threshold   +0.1237  t-CI [+0.0900, +0.1574]  boot-CI [+0.097, +0.154]  ahead in 12/12  sign-test p=0.000  -> supported
+  B2_ensemble_disagreement     +0.0795  t-CI [+0.0497, +0.1093]  boot-CI [+0.056, +0.106]  ahead in 12/12  sign-test p=0.000  -> supported
+  B3_max_class_probability     +0.0301  t-CI [+0.0094, +0.0508]  boot-CI [+0.013, +0.048]  ahead in 9/12  sign-test p=0.146  -> supported
+
+Ablation (AUROC without the component minus with it; positive = removing it helps):
+  conf   -0.0092  t-CI [-0.0138, -0.0046]  removal raised AUROC in 0/12 seeds  (small effect)  -> helps (removing it lowers AUROC)
+  rel    -0.0349  t-CI [-0.0453, -0.0245]  removal raised AUROC in 0/12 seeds  (large effect)  -> helps (removing it lowers AUROC)
+  exp    +0.0020  t-CI [-0.0007, +0.0048]  removal raised AUROC in 9/12 seeds  (small effect)  -> unresolved (interval includes zero)
+  fam    +0.0088  t-CI [+0.0004, +0.0171]  removal raised AUROC in 10/12 seeds  (small effect)  -> hurts (removing it RAISES AUROC): drop or down-weight, PRD 6.4
+  drift  +0.0000  t-CI [+0.0000, +0.0000]  removal raised AUROC in 0/12 seeds  (small effect)  -> no effect in any seed (inactive on this data by construction)
+  dq     +0.0000  t-CI [+0.0000, +0.0000]  removal raised AUROC in 0/12 seeds  (small effect)  -> no effect in any seed (inactive on this data by construction)
+
+PRIMARY (Trust Index vs B3): SUPPORTED

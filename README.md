@@ -112,11 +112,15 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs, policy proposal and approval, auditor log: done. 73 unit tests; the browser end-to-end check (`web/scripts/e2e.mjs`) has not been rerun since the policy and audit panels were added |
 
 ## What the validation found
-On synthetic data the Trust Index beats the two simplest uncertainty baselines, and cases rated High
-trust are wrong 3 to 5 times less often than average. It does **not** beat the third baseline (maximum
-class probability) by a margin that excludes "no improvement", so by the PRD's own criteria it is
-**not supported as specified**. Explanation reliability, drift and data quality showed no measurable
-value on this data. Details, five method changes made along the way, and the limits:
+On synthetic data the Trust Index beats the two simplest uncertainty baselines (B1, B2) clearly, and
+cases rated High trust are wrong several times less often than average (3 to 5 times on the first two
+seeds; about ten times on average over the twelve, 0.28% against 2.99%). Against the third baseline
+(maximum class probability, B3) the first two seeds were inconclusive: ahead, but not by a margin that
+excludes "no improvement". A pre-set analysis over twelve further seeds (about 1,400 errors) found a
+**small advantage over B3 (+0.03 AUROC, 95% interval +0.009 to +0.051), ahead in 9 of 12 seeds**, so
+by the PRD's criterion it holds on this data, weakly. Explanation reliability showed no measurable value
+on any run, and drift and data quality have none on clean data by construction. None of this is evidence
+about real fraud. Details, five method changes made along the way, and the limits:
 [docs/validation/README.md](docs/validation/README.md).
 
 ## Known gaps

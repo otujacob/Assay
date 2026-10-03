@@ -1,0 +1,272 @@
+{
+ "seeds": [
+  201,
+  202,
+  203,
+  204,
+  205,
+  206,
+  207,
+  208,
+  209,
+  210,
+  211,
+  212
+ ],
+ "n_seeds": 12,
+ "cases_total": 46327,
+ "wrong_total": 1384,
+ "auroc_trust_index": {
+  "mean": 0.9098772325487717,
+  "per_seed": [
+   0.948,
+   0.92,
+   0.877,
+   0.906,
+   0.84,
+   0.933,
+   0.947,
+   0.881,
+   0.916,
+   0.913,
+   0.941,
+   0.897
+  ]
+ },
+ "vs_baselines": {
+  "B1_distance_from_threshold": {
+   "mean_diff": 0.12369369803650314,
+   "t_ci": [
+    0.08995730525666956,
+    0.15743009081633672
+   ],
+   "boot_ci": [
+    0.09726888455768519,
+    0.15439663984395782
+   ],
+   "seeds_ahead": 12,
+   "sign_test_p": 0.00048828125,
+   "per_seed": [
+    0.128,
+    0.231,
+    0.12,
+    0.056,
+    0.14,
+    0.085,
+    0.086,
+    0.12,
+    0.082,
+    0.08,
+    0.143,
+    0.212
+   ],
+   "verdict": "supported"
+  },
+  "B2_ensemble_disagreement": {
+   "mean_diff": 0.07947571883978168,
+   "t_ci": [
+    0.0496632728148919,
+    0.10928816486467145
+   ],
+   "boot_ci": [
+    0.05560182398933327,
+    0.10607920197565213
+   ],
+   "seeds_ahead": 12,
+   "sign_test_p": 0.00048828125,
+   "per_seed": [
+    0.108,
+    0.191,
+    0.051,
+    0.062,
+    0.085,
+    0.082,
+    0.083,
+    0.01,
+    0.079,
+    0.121,
+    0.051,
+    0.03
+   ],
+   "verdict": "supported"
+  },
+  "B3_max_class_probability": {
+   "mean_diff": 0.03007827757427649,
+   "t_ci": [
+    0.009363919963874402,
+    0.05079263518467858
+   ],
+   "boot_ci": [
+    0.012932120135522442,
+    0.04796617453835226
+   ],
+   "seeds_ahead": 9,
+   "sign_test_p": 0.14599609375,
+   "per_seed": [
+    0.059,
+    0.038,
+    0.027,
+    -0.013,
+    0.094,
+    0.029,
+    0.062,
+    -0.009,
+    0.054,
+    0.015,
+    0.006,
+    -0.001
+   ],
+   "verdict": "supported"
+  }
+ },
+ "ablations": {
+  "conf": {
+   "mean_delta": -0.00921113857529754,
+   "t_ci": [
+    -0.013777856171008964,
+    -0.004644420979586115
+   ],
+   "per_seed": [
+    -0.007,
+    -0.002,
+    -0.024,
+    -0.015,
+    -0.01,
+    -0.011,
+    -0.003,
+    -0.002,
+    -0.018,
+    -0.007,
+    -0.011,
+    -0.001
+   ],
+   "seeds_removal_raised_auroc": 0,
+   "effect_size": "small",
+   "reading": "helps (removing it lowers AUROC)"
+  },
+  "rel": {
+   "mean_delta": -0.03492600577723142,
+   "t_ci": [
+    -0.04531356584644386,
+    -0.024538445708018983
+   ],
+   "per_seed": [
+    -0.029,
+    -0.061,
+    -0.028,
+    -0.037,
+    -0.005,
+    -0.033,
+    -0.02,
+    -0.041,
+    -0.019,
+    -0.035,
+    -0.052,
+    -0.057
+   ],
+   "seeds_removal_raised_auroc": 0,
+   "effect_size": "large",
+   "reading": "helps (removing it lowers AUROC)"
+  },
+  "exp": {
+   "mean_delta": 0.0020316198827882805,
+   "t_ci": [
+    -0.000694726851735866,
+    0.0047579666173124275
+   ],
+   "per_seed": [
+    0.002,
+    0.0,
+    0.004,
+    -0.003,
+    0.013,
+    0.004,
+    0.003,
+    -0.001,
+    0.0,
+    0.004,
+    0.003,
+    -0.004
+   ],
+   "seeds_removal_raised_auroc": 9,
+   "effect_size": "small",
+   "reading": "unresolved (interval includes zero)"
+  },
+  "fam": {
+   "mean_delta": 0.008764201159208238,
+   "t_ci": [
+    0.00042249814251228875,
+    0.017105904175904185
+   ],
+   "per_seed": [
+    0.012,
+    0.006,
+    0.014,
+    0.02,
+    -0.025,
+    0.002,
+    -0.006,
+    0.009,
+    0.02,
+    0.018,
+    0.018,
+    0.017
+   ],
+   "seeds_removal_raised_auroc": 10,
+   "effect_size": "small",
+   "reading": "hurts (removing it RAISES AUROC): drop or down-weight, PRD 6.4"
+  },
+  "drift": {
+   "mean_delta": 0.0,
+   "t_ci": [
+    0.0,
+    0.0
+   ],
+   "per_seed": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "seeds_removal_raised_auroc": 0,
+   "effect_size": "small",
+   "reading": "no effect in any seed (inactive on this data by construction)"
+  },
+  "dq": {
+   "mean_delta": 0.0,
+   "t_ci": [
+    0.0,
+    0.0
+   ],
+   "per_seed": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "seeds_removal_raised_auroc": 0,
+   "effect_size": "small",
+   "reading": "no effect in any seed (inactive on this data by construction)"
+  }
+ },
+ "high_trust_error_rate": {
+  "mean": 0.0028310871110539056,
+  "overall_mean": 0.02985150679278825
+ }
+}
