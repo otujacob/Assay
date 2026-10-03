@@ -25,9 +25,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,db]"
+      - run: pip install -e ".[dev,db,crypto]"
       - run: ruff check .
       - run: pytest -q
+      # FR-44: fail the build on a known-vulnerable dependency.
+      - run: pip install pip-audit && pip-audit
+  secrets:
+    # FR-44: fail the build on a committed secret. Full history, so an old leak is also caught.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -41,6 +53,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # Production dependencies only. Open dev-tool advisories (vite 5, vitest 2) need a major
+      # upgrade and affect only the dev server and test runner, not the built bundle.
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

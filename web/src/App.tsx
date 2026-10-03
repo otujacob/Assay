@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, getUser, setUser } from "./api";
+import { AuditLog } from "./components/AuditLog";
 import { CaseDetails } from "./components/CaseDetails";
 import { Governance } from "./components/Governance";
 import { KpiCards } from "./components/KpiCards";
@@ -151,6 +152,7 @@ export default function App() {
             <div className="panel pad muted">Your role does not include the review queue.</div>
           )}
           <Governance report={report} bundle={bundle} />
+          {roles.has("auditor") && <AuditLog />}
         </div>
         <div className="right-col">
           <div className="panel">

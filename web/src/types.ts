@@ -31,6 +31,22 @@ export interface QueueItem {
   sla: SlaInfo;
 }
 
+export interface AuditRow {
+  seq: number | null;
+  time: string;
+  actor: string;
+  action: string;
+  object: string;
+  result: string;
+  row_hash: string;
+}
+
+export interface AuditResponse {
+  items: AuditRow[];
+  matching: number;
+  chain_ok: boolean;
+}
+
 export type CaseStatus = "open" | "escalated" | "decided" | "conflicted" | "adjudicated" | "superseded";
 
 export interface QueueResponse {

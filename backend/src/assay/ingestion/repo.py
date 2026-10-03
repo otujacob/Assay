@@ -58,7 +58,8 @@ class InMemoryRepository:
     # Uniqueness rules mirrored from the Postgres schema.
     _UNIQUE: ClassVar[dict[str, tuple[str, ...]]] = {"model_bundles": ("bundle_id",), "trust_assessments": ("prediction_id", "version_no"),
                                                     "feature_vectors": ("txn_id",), "predictions": ("txn_id",),
-                                                    "review_cases": ("txn_id",)}
+                                                    "review_cases": ("txn_id",), "policy_versions": ("version",),
+                                                    "policy_approvals": ("policy_version_id",)}
 
     def insert(self, tenant_id: str, table: str, body: dict[str, Any], created_by: str) -> dict:
         cols = self._UNIQUE.get(table)

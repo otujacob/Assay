@@ -17,15 +17,19 @@ backend/src/assay/
   features/    versioned feature registry, point-in-time features, leakage checker
   detection/   XGBoost / random forest / isolation forest ensemble, calibration, signed bundles
   trust/       Trust Index components, explanation reliability, TrustAssessor, policy inputs
-  policy/      decision policy engine (evaluation order, trust x risk matrix, recommend-only)
+  policy/      decision policy engine (evaluation order, trust x risk matrix, recommend-only) and
+               versioned tenant policies that need a second person's approval (FR-21)
   ingestion/   validation, idempotency, quarantine, in-memory and PostgreSQL repositories
   scoring/     scoring service: every step stored as append-only lineage, replay, async refinement
   review/      review queue, blind review, analyst actions, conflicts, shadow feedback scores
   validation/  validation harness: baselines, ablations, stress tests, reports
   api/         FastAPI app (signed requests, roles) and server entry point
   lineage/     hash chain used for tamper evidence
+  audit/       read-only audit search and CSV/JSON export (FR-34)
+  crypto/      per-tenant envelope encryption and key rotation for model bundles (FR-41)
+  worker.py    background worker: explanation refinement and the population drift job
 backend/scripts/   run_validation.py, demo_server.py
-db/migrations/     0001..0004: tables, row-level security, append-only triggers, hash chains
+db/migrations/     0001..0006: tables, row-level security, append-only triggers, hash chains
 web/               React + TypeScript review app
 docs/adr/          architecture decision records (0001: Gate 0 working defaults)
 docs/validation/   recorded validation reports and what they found
@@ -75,6 +79,8 @@ $env:ASSAY_DATABASE_URL = "postgresql://assay_login:...@host/assay"   # non-supe
 $env:ASSAY_DEV_CREDENTIALS = '[{"key_id":"k1","tenant_id":"t1","secret":"...","roles":["ingest","analyst"]}]'
 $env:ASSAY_BUNDLES = '[{"tenant_id":"t1","path":"C:/models/t1/b-1234"}]'   # signed bundles; omit = ingest only
 $env:ASSAY_BUNDLE_SIGNING_KEY = "..."
+# optional, FR-41: open bundles sealed with the tenant key, and refuse any that are not
+$env:ASSAY_MASTER_KEY = "...32+ characters..."; $env:ASSAY_REQUIRE_ENCRYPTED_BUNDLES = "1"
 uvicorn assay.api.main:app
 ```
 Apply `db/migrations/*.sql` in order first. **The application must connect as an ordinary login role
@@ -97,11 +103,11 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | E2 Features and detection | point-in-time features with leakage check, ensemble, calibration, signed tenant-bound bundles: done |
 | E3 Explanation | TreeSHAP attributions with stability, sensitivity, faithfulness, reproducibility: done (boosted-tree members only) |
 | E4 Trust Index | all six components plus the assessor, Insufficient-evidence state, async refinement: done. `hum` inactive in the MVP by design |
-| E5 Policy and review | policy engine, queue with priority and SLA, blind review, reason codes, conflicts and adjudication: done |
+| E5 Policy and review | policy engine, versioned policies with second-person approval (FR-21), queue with priority and SLA, blind review, reason codes, conflicts and adjudication: done |
 | E6 Feedback capture | decisions, blind flag, checklist, shadow scores AAS/FCS/LVS/CRS/FQS: done. Nothing trains on them |
 | E7 Validation harness and dashboard | baselines B1 to B4, ablations, four accuracy measures, stress tests, stored reports, dashboard summary: done |
-| E8 Lineage completion | every decision step is an append-only record; replay reproduces decisions; audit-log export and auditor UI: partly done (API only) |
-| E9 Security and tenancy | tenant isolation, signed requests, roles, non-superuser enforcement: started. SSO, MFA, per-tenant keys, penetration test: **not done** |
+| E8 Lineage completion | every decision step is an append-only record; replay reproduces decisions; audit-log search and CSV/JSON export (FR-34) with an auditor UI panel: done (tested on the in-memory store; the PostgreSQL path is unexercised) |
+| E9 Security and tenancy | tenant isolation, signed requests, roles, non-superuser enforcement, rate limiting, access events in the audit log (FR-43), CI secret and dependency scans (FR-44): done. Per-tenant encryption (FR-41): model bundles only, with a local key provider ([docs/security/key-management.md](docs/security/key-management.md)). SSO, MFA, a managed key service, encrypted exports, penetration test: **not done** |
 | Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs: done. 60 unit tests plus a browser end-to-end check |
 
 ## What the validation found
@@ -114,13 +120,19 @@ value on this data. Details, five method changes made along the way, and the lim
 
 ## Known gaps
 - **No real data, no pilot.** All evidence is synthetic. Real validation needs a pilot institution.
-- **Security and compliance.** No SSO/MFA, per-tenant encryption keys, penetration test, or legal review
+- **Security and compliance.** No SSO/MFA, managed key service, encrypted exports, penetration test, or legal review
   (UK data protection, FCA/PRA expectations). Gate 1 cannot be passed yet.
 - **CI has not run on GitHub** (written, unverified there).
 - **Explanation cost.** About 27 ms per case, so real-time explanation testing of every case is
-  expensive. Cases scored without it cannot reach High trust until the async worker
-  (`ScoringService.refine_pending`) runs. There is no scheduler for that worker yet.
-- **Population drift job** does not exist; drift is treated as zero until one supplies a vector.
+  expensive. Cases scored without it cannot reach High trust until the worker runs
+  (`python -m assay.worker`, which loops on a timer; `--once` for a single pass). Nothing starts it
+  for you: run it as its own process or scheduled task, or High trust is unreachable for those cases.
+- **Population drift job** runs in that worker. It skips a window of fewer than 100 rows or under
+  24 hours (a short window false-alarms on time-of-day features), so a quiet tenant has no drift
+  signal and scoring treats drift as zero. Window and alarm level are parameters, not tuned values.
+- **Dev-tool advisories.** `npm audit` reports advisories in Vite 5 and Vitest 2 (dev server and
+  test runner only, not the built app). CI gates production dependencies only until those are upgraded.
+- **API rate limit** is per process, not shared across workers.
 - **Institution hard rules** (sanctions holds) have a hook but no rule source.
 - **Analyst reason codes** are working defaults, not agreed with a fraud-operations adviser.
 - **Noisy-analyst-label stress test** is reported as not testable (needs the feedback engine's learning side, V1).

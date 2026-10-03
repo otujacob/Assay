@@ -3,7 +3,9 @@ parameter. Requests are signed: X-Assay-Signature = hex HMAC-SHA256(secret, body
 sign the empty body.
 
 Roles (a first step toward FR-42): "ingest" submits transactions and outcomes; "analyst" reads
-decisions and explanations; "auditor" reads lineage and runs replay. A credential may hold several.
+decisions and explanations; "auditor" reads lineage, the audit log and runs replay; "admin"
+proposes decision policies and "approver" approves them (never their own). A credential may hold
+several.
 
 If scoring cannot run (no champion bundle), the transaction is still stored and the caller gets 503
 so its own fallback controls apply (PRD 18, 26.5). Retrying is safe: ingestion and scoring are
@@ -15,17 +17,28 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
+import math
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 
+from assay import audit
+from assay.api.limits import RateLimiter
 from assay.ingestion import IngestionService
+from assay.policy import PolicyError, PolicyService
 from assay.review.service import ReviewError, ReviewService
 from assay.scoring import ScoringError, ScoringService
 
+log = logging.getLogger("assay.api")
 MAX_BATCH = 1000
+DEFAULT_RATE_LIMIT = 600  # requests per key per minute, per process (a parameter, not a measured need)
+MAX_LOGGED_AUTH_FAILURES = 5  # per key per minute
 DEFAULT_ROLES = frozenset({"ingest"})
 # Roles that see blind cases in full (PRD 8.3): everyone except a plain analyst.
 STAFF_ROLES = frozenset({"senior_analyst", "manager", "auditor", "approver"})
@@ -73,7 +86,9 @@ def _as_provider(obj, cls):
 
 def create_app(service: IngestionService | ServiceProvider, credentials: Credentials, *,
                scoring: ScoringService | ScoringProvider | None = None,
-               review: ReviewService | ReviewProvider | None = None) -> FastAPI:
+               review: ReviewService | ReviewProvider | None = None,
+               rate_limit_per_minute: int | None = DEFAULT_RATE_LIMIT,
+               clock: Callable[[], float] = time.monotonic) -> FastAPI:
     provider = _as_provider(service, IngestionService)
     scorer = _as_provider(scoring, ScoringService)
     reviewer = _as_provider(review, ReviewService)
@@ -83,17 +98,46 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
     def healthz():
         return {"status": "ok"}
 
+    limiter = RateLimiter(rate_limit_per_minute, clock=clock) if rate_limit_per_minute else None
+    # Failed sign-ins are written by callers who have not proven who they are, so only a few per key
+    # per minute reach the audit log. The rest go to the application log, so a guessing attacker
+    # cannot fill the tenant's audit trail.
+    failures = RateLimiter(MAX_LOGGED_AUTH_FAILURES, clock=clock)
+    route_of: ContextVar[str] = ContextVar("assay_route", default="-")
+
+    def audit_event(cred: Credential, action: str, obj: str, result: str) -> None:
+        """Record an access event (FR-43). Never turns the response into a 500."""
+        try:
+            with provider() as svc:
+                svc.repo.append_audit(cred.tenant_id, f"api:{cred.key_id}", action, obj, result,
+                                      datetime.now(UTC))
+        except Exception:
+            log.exception("could not write audit event %s for %s", action, cred.key_id)
+
     async def authed(request: Request, x_assay_key: str = Header(...),
                      x_assay_signature: str = Header(...)) -> tuple[Credential, bytes]:
         body = await request.body()
         cred = credentials.get(x_assay_key)
+        route = getattr(request.scope.get("route"), "path", request.url.path)
         # Same response for unknown key and bad signature: don't reveal which keys exist.
-        if cred is None or not hmac.compare_digest(sign(cred.secret, body), x_assay_signature):
+        if cred is None:
+            log.warning("authentication failed: unknown key id on %s", route)
             raise HTTPException(401, {"code": "unauthorized"})
+        if not hmac.compare_digest(sign(cred.secret, body), x_assay_signature):
+            if failures.check(cred.key_id) is None:
+                audit_event(cred, "auth_failed", route, "bad_signature")
+            else:
+                log.warning("authentication failed for key %s on %s (audit cap reached)", cred.key_id, route)
+            raise HTTPException(401, {"code": "unauthorized"})
+        wait = limiter.check(cred.key_id) if limiter else None
+        if wait is not None:
+            raise HTTPException(429, {"code": "rate_limited"}, headers={"Retry-After": str(math.ceil(wait))})
+        route_of.set(route)
         return cred, body
 
     def need(cred: Credential, *roles: str) -> None:
         if not (cred.roles & set(roles)):
+            audit_event(cred, "access_denied", route_of.get(), ",".join(sorted(roles)))
             raise HTTPException(403, {"code": "forbidden"})
 
     def parse(body: bytes):
@@ -212,6 +256,29 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         return json.loads(json.dumps(
             with_scoring(cred, lambda sc: sc.lineage(cred.tenant_id, decision_id)), default=str))
 
+    @app.get("/v1/audit/export")
+    def audit_export(format: str = "json", txn_id: str | None = None, actor: str | None = None,
+                     action: str | None = None, model_version: str | None = None,
+                     since: str | None = None, until: str | None = None, limit: int = 500,
+                     auth=Depends(authed)):
+        """Read-only audit search and export (FR-34). Auditors only; the read is itself logged."""
+        cred, _ = auth
+        need(cred, "auditor")
+        if format not in ("json", "csv"):
+            raise HTTPException(422, {"code": "bad_format", "allowed": ["json", "csv"]})
+        try:
+            lo = datetime.fromisoformat(since) if since else None
+            hi = datetime.fromisoformat(until) if until else None
+        except ValueError:
+            raise HTTPException(422, {"code": "bad_date"}) from None
+        out = with_scoring(cred, lambda sc: sc.audit_log(
+            cred.tenant_id, f"api:{cred.key_id}", txn_id=txn_id, actor=actor, action=action,
+            model_version=model_version, since=lo, until=hi, limit=limit))
+        if format == "csv":
+            return Response(audit.to_csv(out["items"]), media_type="text/csv", headers={
+                "Content-Disposition": 'attachment; filename="assay-audit.csv"'})
+        return out
+
     @app.post("/v1/decisions/{decision_id}/replay")
     def replay(decision_id: str, auth=Depends(authed)):
         cred, _ = auth
@@ -291,6 +358,41 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         cred, _ = auth
         need(cred, "manager")
         return with_review(lambda rv: rv.dashboard(cred.tenant_id, window_days=window_days))
+
+    # -- decision policies: versioned, second-person approval (PRD 10.4, FR-21) ---------------------------
+    def with_policy(fn):
+        if scorer is None:
+            raise HTTPException(404, {"code": "not_found"})
+        try:
+            with scorer() as sc:
+                return fn(PolicyService(sc.repo, sc.cfg.clock))
+        except PolicyError as e:
+            raise HTTPException(e.http, {"code": e.code, "detail": str(e)}) from None
+
+    @app.get("/v1/config/policies")
+    def list_policies(auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "admin", "approver", "auditor")
+        return {"items": with_policy(lambda ps: ps.list(cred.tenant_id))}
+
+    @app.post("/v1/config/policies", status_code=201)
+    def create_policy(auth=Depends(authed)):
+        cred, body = auth
+        need(cred, "admin")
+        p = parse(body)
+        if not isinstance(p, dict):
+            raise HTTPException(400, {"code": "expected_object"})
+        try:
+            eff = datetime.fromisoformat(p.pop("effective_from")) if p.get("effective_from") else None
+        except (ValueError, TypeError):
+            raise HTTPException(422, {"code": "bad_date"}) from None
+        return with_policy(lambda ps: ps.propose(cred.tenant_id, f"u:{cred.key_id}", p, eff))
+
+    @app.post("/v1/config/policies/{policy_id}/approve")
+    def approve_policy(policy_id: str, auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "approver")
+        return with_policy(lambda ps: ps.approve(cred.tenant_id, f"u:{cred.key_id}", policy_id))
 
     # -- governance reads (PRD 12, 26.2) -----------------------------------------------------------------
     @app.get("/v1/validation/reports")

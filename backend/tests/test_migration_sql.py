@@ -33,7 +33,7 @@ def test_migrations_exist_in_order():
 
 @pytest.mark.parametrize("name", list(SQL))
 def test_each_migration_parses(name):
-    assert len(pglast.parse_sql(SQL[name])) >= 3  # parses, and is not an empty file
+    assert len(pglast.parse_sql(SQL[name])) >= 2  # parses, and is not an empty file (a table plus its security block)
 
 
 def test_plpgsql_functions_parse():
@@ -56,7 +56,7 @@ def test_plpgsql_functions_parse():
 
 def test_every_table_has_tenant_id_and_chain_columns():
     tables = tables_created(ALL)
-    assert len(tables) == 15
+    assert len(tables) == 18
     for name, cols in tables.items():
         assert {"tenant_id", "prev_hash", "row_hash", "payload_hash", "created_by"} <= cols, name
 

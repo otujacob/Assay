@@ -21,11 +21,12 @@ from typing import Any
 
 import numpy as np
 
+from assay import audit
 from assay.detection.bundle import BundleManifest
 from assay.features import FEATURE_SET_VERSION, compute_features, definition_versions, feature_names
 from assay.features.compute import parse_time
 from assay.ingestion.repo import DuplicateError
-from assay.policy import Action, PolicyConfig, PolicyInput, evaluate
+from assay.policy import Action, PolicyInput, PolicyService, evaluate
 from assay.trust import Component, TrustConfig
 from assay.trust.assessor import CaseAssessment, TrustAssessor
 from assay.trust.explain import ExplainConfig
@@ -120,6 +121,16 @@ class ScoringService:
         # inside the same transaction. The review workflow uses it to enqueue cases.
         self.decision_hooks: list[Callable[[str, dict, Any], None]] = []
 
+    def current_drift(self, tenant_id: str, lb: LoadedBundle | None = None) -> np.ndarray:
+        """Per-feature drift in force: the latest stored drift run for this bundle (so every worker
+        and every restart agree), else an in-process value, else zeros (no drift information)."""
+        lb = lb or self.registry.champion(tenant_id)
+        runs = self.repo.find(tenant_id, "drift_runs", newest_first=True, limit=1)
+        if runs and runs[0]["bundle_id"] == lb.manifest.bundle_id and len(runs[0]["drift"]) == lb.n_features:
+            return np.array(runs[0]["drift"], dtype=float)
+        d = self.drift.get(tenant_id)
+        return d if d is not None and len(d) == lb.n_features else np.zeros(lb.n_features)
+
     def _after_decision(self, tenant_id: str, pd: dict, ca) -> None:
         for hook in self.decision_hooks:
             hook(tenant_id, pd, ca)
@@ -173,7 +184,7 @@ class ScoringService:
             "distance_to_threshold": _f(pred.distance_to_threshold[0])}, actor)
 
         explain = self.should_explain(txn["txn_id"], _f(pred.calibrated[0]), t_low)
-        drift = self.drift.get(tenant_id, np.zeros(x.shape[1]))
+        drift = self.current_drift(tenant_id, lb)
         ca = lb.assessor.assess(x, [txn], pred, drift_vector=drift, explain_mask=np.array([explain]),
                                 source_health=self.cfg.source_health, recorded_at=[txn["recorded_at"]])[0]
         if explain:
@@ -211,8 +222,10 @@ class ScoringService:
                          "cohort": asdict(ca.cohort), "bundle_id": lb.manifest.bundle_id}}, actor)
 
     def _store_policy(self, tenant_id, txn, ta, risk, ca: CaseAssessment, lb, actor):
-        pcfg = PolicyConfig(version=self.cfg.policy_version, t_low=lb.manifest.thresholds["t_low"],
-                            t_high=lb.manifest.thresholds["t_high"])
+        # Thresholds come from the model bundle; the rest from the approved policy in force now.
+        pcfg = PolicyService(self.repo).config(
+            tenant_id, self.cfg.clock(), t_low=lb.manifest.thresholds["t_low"],
+            t_high=lb.manifest.thresholds["t_high"], default_version=self.cfg.policy_version)
         hard = self.cfg.hard_rule(txn) if self.cfg.hard_rule else None
         res = evaluate(PolicyInput(_f(risk), ca.result.state, ca.result.reason_codes, hard), pcfg)
         return self.repo.insert(tenant_id, "policy_decisions", {
@@ -317,6 +330,13 @@ class ScoringService:
                  "metrics": r["manifest"].get("metrics"), "calibration": r["manifest"].get("calibration"),
                  "created_at": r["manifest"].get("created_at"),
                  "feature_set_version": r["manifest"].get("feature_set_version")} for r in rows]
+
+    def audit_log(self, tenant_id: str, reader: str, **filters) -> dict:
+        """Search the audit log (FR-34). Reading it is itself audited (FR-43). `reader` is who is
+        asking; the `actor` filter is whose recorded actions to look for."""
+        out = audit.query(self.repo, tenant_id, **filters)
+        self.repo.append_audit(tenant_id, reader, "audit_read", "-", str(out["matching"]), self.cfg.clock())
+        return out
 
     def lineage(self, tenant_id: str, decision_id: str) -> dict:
         """Everything linked to a decision (PRD 14.2 backward impact query)."""

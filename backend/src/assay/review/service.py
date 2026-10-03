@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from assay.ingestion.repo import DuplicateError
+from assay.scoring.service import ScoringError
 from assay.trust.reliability import wilson_interval
 
 from . import feedback as fb
@@ -468,7 +469,10 @@ class ReviewService:
         dispositions = Counter(r["disposition"] for r in self.repo.find(tenant_id, "feedback_records"))
         nd = sum(dispositions.values())
         dq_floor = sum(1 for t in latest.values() if "DATA_QUALITY_FLOOR" in t["reason_codes"])
-        drift = self.scoring.drift.get(tenant_id)
+        try:
+            drift = self.scoring.current_drift(tenant_id)
+        except ScoringError:  # no champion bundle: nothing to measure drift against
+            drift = None
         max_drift = float(drift.max()) if drift is not None and len(drift) else 0.0
         return {
             "as_of": now.isoformat(),

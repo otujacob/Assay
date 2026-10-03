@@ -1,5 +1,5 @@
 import type {
-  ActionRequest, ActionResponse, BundleInfo, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
+  ActionRequest, ActionResponse, AuditResponse, BundleInfo, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -66,7 +66,34 @@ const qs = (f: QueueFilters): string => {
   return s ? `?${s}` : "";
 };
 
+export interface AuditFilters {
+  txn_id?: string;
+  actor?: string;
+  action?: string;
+  model_version?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+}
+
+const auditQs = (f: AuditFilters, format?: "csv"): string => {
+  const p = new URLSearchParams();
+  Object.entries(f).forEach(([k, v]) => {
+    if (v !== undefined && v !== "") p.set(k, String(v));
+  });
+  if (format) p.set("format", format);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+};
+
 export const api = {
+  audit: (f: AuditFilters = {}) => call<AuditResponse>("GET", `/audit/export${auditQs(f)}`),
+  /** The CSV export as a Blob, so the browser can save it (the demo user is a header, not a cookie). */
+  auditCsv: async (f: AuditFilters = {}): Promise<Blob> => {
+    const res = await fetch(`/api/audit/export${auditQs(f, "csv")}`, { headers: { "X-Demo-User": currentUser } });
+    if (!res.ok) throw new ApiError(res.status, "audit_export", res.statusText);
+    return res.blob();
+  },
   users: async (): Promise<DemoUser[]> => {
     const res = await fetch("/demo/users");
     if (!res.ok) throw new ApiError(res.status, "demo_users", "demo server not reachable");

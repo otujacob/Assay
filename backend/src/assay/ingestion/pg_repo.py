@@ -61,12 +61,17 @@ COLUMNS: dict[str, tuple[str, ...]] = {
                          "formula_version", "disposition", "disposition_reason"),
     "validation_reports": ("schema_version", "bundle_id", "dataset_id", "mode", "n_cases", "measures",
                            "baselines", "ablations", "stress_results", "pass_criteria", "limitations"),
+    "policy_versions": ("schema_version", "version", "payload", "effective_from"),
+    "policy_approvals": ("schema_version", "policy_version_id", "proposed_by", "approved_by",
+                         "approved_at"),
+    "drift_runs": ("schema_version", "bundle_id", "n_reference", "n_window", "window_start",
+                   "window_end", "feature_names", "drift", "max_drift", "alarm_level", "alarm"),
 }
 JSONB_COLUMNS = frozenset({"reasons", "manifest", "definition_versions", "feature_names",
                            "feature_values", "params", "attributions", "reason_codes", "components",
                            "weights_used", "evidence", "measures", "baselines", "ablations",
                            "stress_results", "pass_criteria", "limitations", "evidence_checklist",
-                           "display_state"})
+                           "display_state", "payload", "drift"})
 
 
 def _norm(row: dict[str, Any]) -> dict[str, Any]:

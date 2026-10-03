@@ -8,6 +8,10 @@ Configuration comes from the environment:
   ASSAY_BUNDLES             JSON list of {"tenant_id", "path"}: signed model bundles to load.
   ASSAY_BUNDLE_SIGNING_KEY  key the bundles were signed with (from the secret store in production).
                             Bundles are verified before they are deserialised.
+  ASSAY_MASTER_KEY          master secret (at least 32 characters) for the LOCAL key provider that
+                            opens sealed bundles (FR-41). Production should use a managed key service
+                            behind the same assay.crypto.KeyProvider interface instead.
+  ASSAY_REQUIRE_ENCRYPTED_BUNDLES   "1" refuses any bundle that is not sealed with the tenant key.
 Without ASSAY_BUNDLES the server runs ingestion only.
 """
 
@@ -59,10 +63,28 @@ def make_review_provider(pool: ConnectionPool, registry: BundleRegistry):
     return provider
 
 
-def load_registry(specs: list[dict], key: bytes) -> BundleRegistry:
+def key_provider_from_env():
+    """The local key provider if ASSAY_MASTER_KEY is set, else None (plaintext bundles only)."""
+    master = os.environ.get("ASSAY_MASTER_KEY")
+    if not master:
+        return None
+    from assay.crypto import LocalKeyProvider
+
+    return LocalKeyProvider(master.encode())
+
+
+def load_registry(specs: list[dict], key: bytes, provider=None,
+                  require_encryption: bool | None = None) -> BundleRegistry:
+    if require_encryption is None:
+        require_encryption = os.environ.get("ASSAY_REQUIRE_ENCRYPTED_BUNDLES") == "1"
+    if require_encryption and provider is None:
+        raise RuntimeError("ASSAY_REQUIRE_ENCRYPTED_BUNDLES is set but there is no key provider "
+                           "(set ASSAY_MASTER_KEY)")
     registry = BundleRegistry()
     for s in specs:
-        artefact, manifest = load_bundle(s["path"], s["tenant_id"], key)  # verifies, then loads
+        # verifies the signature, decrypts if sealed, then loads
+        artefact, manifest = load_bundle(s["path"], s["tenant_id"], key, decrypt_with=provider,
+                                         require_encryption=require_encryption)
         registry.register(s["tenant_id"], artefact, manifest)
     return registry
 
@@ -87,7 +109,7 @@ def build_app():
     scoring = review = None
     if os.environ.get("ASSAY_BUNDLES"):
         registry = load_registry(json.loads(os.environ["ASSAY_BUNDLES"]),
-                                 os.environ["ASSAY_BUNDLE_SIGNING_KEY"].encode())
+                                 os.environ["ASSAY_BUNDLE_SIGNING_KEY"].encode(), key_provider_from_env())
         scoring = make_scoring_provider(pool, registry)
         review = make_review_provider(pool, registry)
     return create_app(make_provider(pool), Credentials(creds), scoring=scoring, review=review)

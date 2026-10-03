@@ -45,6 +45,7 @@ DEMO_USERS = {
     "manager": {"roles": {"manager"}, "label": "Fraud Manager"},
     "auditor": {"roles": {"auditor"}, "label": "Auditor (read-only)"},
     "approver": {"roles": {"approver"}, "label": "Model Risk Approver"},
+    "admin": {"roles": {"admin"}, "label": "Tenant Administrator (proposes policies)"},
     "ingest": {"roles": {"ingest"}, "label": "Ingestion system"},
 }
 SECRETS = {k: f"demo-{k}-secret".encode() for k in DEMO_USERS}
@@ -139,7 +140,9 @@ def build_app(log=print) -> FastAPI:
                                    content=body, headers={"X-Assay-Key": user,
                                                           "X-Assay-Signature": sign(SECRETS[user], body),
                                                           "Content-Type": "application/json"})
-        return Response(resp.content, resp.status_code, media_type="application/json")
+        headers = {k: v for k, v in resp.headers.items() if k.lower() == "content-disposition"}
+        return Response(resp.content, resp.status_code, headers=headers,
+                        media_type=resp.headers.get("content-type", "application/json"))
 
     dist = ROOT.parent / "web" / "dist"
     if dist.exists():
