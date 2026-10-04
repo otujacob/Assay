@@ -1,0 +1,22 @@
+Seeds: 12 (12 fitted, 0 refused for too little evidence); judged on the stable part in 12, after novelty in 12
+
+P1 CALIBRATION (stable part): SUPPORTED   {'mean_ece_within_0.03': True, 'better_than_provisional_as_probability': True}
+   mean ECE, calibrated:                        0.0046  (tolerance 0.03)
+   mean ECE, provisional read as a probability: 0.2681
+   improvement +0.2635  t-CI [+0.2559, +0.2711]
+
+P2 DISCRIMINATION (stable part): WORSE or unresolved
+   AUROC calibrated 0.869 vs provisional 0.880: calibrated minus provisional -0.0104  t-CI [-0.0369, +0.0162]  ahead in 5/12
+
+P3 AFTER THE NOVEL FRAUD TYPE APPEARS: NON-INFERIOR
+   calibrated minus provisional -0.0034  t-CI [-0.0127, +0.0059]  ahead in 4/12
+
+Reported, no threshold:
+   calibrated minus B3, stable part:  +0.0024  t-CI [-0.0485, +0.0534]  ahead in 3/12
+   calibrated minus B3, after novelty: +0.0244  t-CI [+0.0099, +0.0389]  ahead in 11/12
+   calibration after novelty: ECE calibrated 0.0039 vs provisional-as-probability 0.2694
+   seeds passing the PRD 6.6 gate on their own: 2/12
+   High band observed error (stable part): 0.0033 (set from a tolerated 1%)
+   mean interval width: 1.23 points
+
+VERDICT: STAY IN PROVISIONAL MODE

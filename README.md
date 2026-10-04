@@ -16,7 +16,8 @@ backend/src/assay/
   synthetic/   synthetic data generator with known ground truth (fraud types, drift, label delay)
   features/    versioned feature registry, point-in-time features, leakage checker
   detection/   XGBoost / random forest / isolation forest ensemble, calibration, signed bundles
-  trust/       Trust Index components, explanation reliability, TrustAssessor, policy inputs
+  trust/       Trust Index components, explanation reliability, TrustAssessor, policy inputs, and the
+               calibrated Trust Index (`calibrated.py`, off unless it passed its gate)
   policy/      decision policy engine (evaluation order, trust x risk matrix, recommend-only) and
                versioned tenant policies that need a second person's approval (FR-21)
   ingestion/   validation, idempotency, quarantine, in-memory and PostgreSQL repositories
@@ -103,7 +104,7 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | E1 Ingestion and lineage | validation, idempotency, quarantine, maturity, late events, hash chain, tenant isolation (row-level security): done, tested on memory and real PostgreSQL 16 |
 | E2 Features and detection | point-in-time features with leakage check, ensemble, calibration, signed tenant-bound bundles: done |
 | E3 Explanation | TreeSHAP attributions with stability, sensitivity, faithfulness, reproducibility: done (boosted-tree members only) |
-| E4 Trust Index | all six components plus the assessor, Insufficient-evidence state, async refinement: done. `hum` inactive in the MVP by design |
+| E4 Trust Index | all six components plus the assessor, Insufficient-evidence state, async refinement: done. `hum` inactive in the MVP by design. Calibrated mode (PRD 5.6) is built and gated in code, but **not enabled**: on twelve fresh synthetic seeds it is well calibrated but was not shown to rank errors as well as the provisional score ([docs/validation/README.md](docs/validation/README.md)) |
 | E5 Policy and review | policy engine, versioned policies with second-person approval (FR-21) that can set risk thresholds and an "always review amounts from" rule, policy replay (preview a proposed policy's effect on review volume against the policy in force; it does not predict fraud caught or analyst decisions). A policy that sets its own risk thresholds replaces the model's, so the validation figures, measured at the model's thresholds, no longer describe it, queue with priority and SLA, blind review, reason codes, conflicts and adjudication: done |
 | E6 Feedback capture | decisions, blind flag, checklist, shadow scores AAS/FCS/LVS/CRS/FQS: done. Nothing trains on them |
 | E7 Validation harness and dashboard | baselines B1 to B4, ablations, four accuracy measures, stress tests, stored reports, dashboard summary: done |
@@ -139,6 +140,10 @@ about real fraud. Details, five method changes made along the way, and the limit
 - **Institution hard rules** (sanctions holds) have a hook but no rule source.
 - **Analyst reason codes** are working defaults, not agreed with a fraud-operations adviser.
 - **Noisy-analyst-label stress test** is reported as not testable (needs the feedback engine's learning side, V1).
-- **Not built (later phases):** calibrated mode, counterfactuals, graph store, automation above level 0,
+- **Not built (later phases):** counterfactuals, graph store, automation above level 0,
   AI copilot, regulator export views.
+- **Calibrated mode exists but should stay off.** It produces genuine probabilities, but did not meet the
+  pre-set ranking test, and passed the PRD gate in 2 of 12 synthetic seeds. A pilot's matured outcomes are
+  what could change that. `python backend/scripts/build_calibrated_bundle.py` shows the workflow; a server
+  refuses calibrated mode for any bundle whose gate failed.
 - **Open product decisions** still on working defaults: see [docs/adr/0001-gate-0-defaults.md](docs/adr/0001-gate-0-defaults.md).

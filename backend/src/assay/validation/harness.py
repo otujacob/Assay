@@ -56,8 +56,10 @@ class ValidationCases:
         return self.call != (self.y == 1)
 
 
-def collect_cases(trained_result, txns_by_id: dict[str, dict], n: int, seed: int = 0) -> ValidationCases:
-    """Assess a random sample of the test window, with explanation testing on every case."""
+def collect_cases(trained_result, txns_by_id: dict[str, dict], n: int, seed: int = 0,
+                  explain_frac: float = 1.0) -> ValidationCases:
+    """Assess a random sample of the test window. Explanation testing runs on every case by default, or on a
+    random `explain_frac` of them (the rest have `exp` missing, as under OPD-7 sampling)."""
     r = trained_result
     ids = r.test_table.txn_ids
     idx = np.sort(np.random.default_rng(seed).choice(len(ids), min(n, len(ids)), replace=False))
@@ -68,7 +70,8 @@ def collect_cases(trained_result, txns_by_id: dict[str, dict], n: int, seed: int
     assessor = TrustAssessor(r.model, r.reference, r.store, r.manifest.thresholds,
                              model_version=r.manifest.bundle_id)
     drift = np.zeros(X.shape[1])
-    cases = assessor.assess(X, txns, pred, drift_vector=drift)
+    mask = np.random.default_rng(seed + 1).uniform(size=len(idx)) < explain_frac if explain_frac < 1.0 else None
+    cases = assessor.assess(X, txns, pred, drift_vector=drift, explain_mask=mask)
     return ValidationCases(cases, txns, pred.calibrated, pred.raw, pred.member_spread, r.test_y[idx],
                            th, tl, r.test_table.t[idx], assessor.trust_cfg, r.store.total())
 

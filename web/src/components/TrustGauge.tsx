@@ -18,8 +18,15 @@ export function arcPath(v0: number, v1: number, r = R): string {
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-const bandColour = (low: number | null): string =>
-  low === null ? "var(--grey)" : low >= 70 ? "var(--green)" : low >= 40 ? "var(--amber)" : "var(--red)";
+/** Colour follows the case's BAND, which the server decided, not a cut-off applied to the number here: in
+ *  calibrated mode the number is a probability and a score of 97 is Moderate, not "above 70". */
+const bandColour = (state: Trust["state"]): string =>
+  state === "high" ? "var(--green)" : state === "moderate" ? "var(--amber)" : state === "low" ? "var(--red)" : "var(--grey)";
+
+const MODE_HELP = {
+  provisional: "A ranking of how much evidence supports the recommendation. It is not a probability.",
+  calibrated: "Among similar past cases, the recommendation was correct about this often.",
+} as const;
 
 /**
  * AI Trust Index gauge. Insufficient evidence is shown as such, with its reasons, and NEVER as a
@@ -27,19 +34,27 @@ const bandColour = (low: number | null): string =>
  */
 export function TrustGauge({ trust }: { trust: Trust }) {
   const insufficient = trust.state === "insufficient_evidence" || trust.ti === null;
-  const low = trust.ti_low;
+  const calibrated = trust.mode === "calibrated";
+  const colour = bandColour(trust.state);
+  // A calibrated score is a probability near 100, so whole numbers would hide the differences that matter.
+  const fmt = (v: number | null) => (calibrated ? (v ?? 0).toFixed(1) : String(Math.round(v ?? 0)));
   return (
     <div className="gauge" data-testid="trust-gauge">
       <div className="gauge-head">
         <span className="card-title">AI Trust Index</span>
-        <span className="mode-tag">{trust.mode === "provisional" ? "Provisional Mode" : "Calibrated Mode"}</span>
+        <span className="mode-tag" title={MODE_HELP[calibrated ? "calibrated" : "provisional"]}>
+          {calibrated ? "Calibrated Mode" : "Provisional Mode"}
+        </span>
       </div>
       <div className="gauge-body">
         <svg viewBox="0 0 160 100" className="gauge-svg" role="img"
-             aria-label={insufficient ? "Trust Index: insufficient evidence" : `Trust Index ${Math.round(trust.ti ?? 0)} out of 100`}>
+             aria-label={insufficient ? "Trust Index: insufficient evidence"
+                       : calibrated ? `Estimated chance the recommendation is correct: ${fmt(trust.ti)} percent`
+                       : `Trust Index ${Math.round(trust.ti ?? 0)} out of 100`}>
           <path d={arcPath(0, 100)} className="gauge-track" />
-          {/* band boundaries from the defaults in PRD 5.5: placeholders, not validated */}
-          {[40, 70].map((v) => {
+          {/* provisional band boundaries (PRD 5.5 placeholders). Calibrated bands are set by tolerated error rates,
+              which the gauge is not told, so it draws none rather than a wrong one. */}
+          {(calibrated ? [] : [40, 70]).map((v) => {
             const [x0, y0] = at(v, R - 8);
             const [x1, y1] = at(v, R + 8);
             return <line key={v} x1={x0} y1={y0} x2={x1} y2={y1} className="gauge-tick" />;
@@ -48,8 +63,8 @@ export function TrustGauge({ trust }: { trust: Trust }) {
             <path d={arcPath(0, 100)} className="gauge-none" />
           ) : (
             <>
-              <path d={arcPath(trust.ti_low ?? 0, trust.ti_high ?? 0)} className="gauge-interval" style={{ stroke: bandColour(low) }} />
-              <path d={arcPath(0, trust.ti ?? 0)} className="gauge-value" style={{ stroke: bandColour(low) }} />
+              <path d={arcPath(trust.ti_low ?? 0, trust.ti_high ?? 0)} className="gauge-interval" style={{ stroke: colour }} />
+              <path d={arcPath(0, trust.ti ?? 0)} className="gauge-value" style={{ stroke: colour }} />
             </>
           )}
         </svg>
@@ -62,11 +77,12 @@ export function TrustGauge({ trust }: { trust: Trust }) {
           ) : (
             <>
               <div className="gauge-number">
-                {Math.round(trust.ti ?? 0)}
-                <span className="gauge-of"> / 100</span>
+                {fmt(trust.ti)}
+                <span className="gauge-of">{calibrated ? "%" : " / 100"}</span>
               </div>
+              {calibrated && <div className="small">Estimated chance this recommendation is correct</div>}
               <div className="muted small" title="Uncertainty interval. Bands use the lower bound (PRD 5.5).">
-                Interval {Math.round(trust.ti_low ?? 0)} – {Math.round(trust.ti_high ?? 0)}
+                Interval {fmt(trust.ti_low)} – {fmt(trust.ti_high)}{calibrated ? "%" : ""}
               </div>
             </>
           )}

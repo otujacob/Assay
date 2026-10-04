@@ -42,13 +42,19 @@ class CaseAssessment:
     data_quality: dict[str, float]
     cohort: Cohort
     explanation: dict = field(default_factory=dict)  # sub-scores, for storage
+    provisional: TrustResult | None = None  # the fixed-weight result, kept when calibrated mode replaced `result`
 
 
 class TrustAssessor:
     def __init__(self, model: DetectionModel, reference: TrustReference, store: CohortStore,
                  thresholds: dict[str, float], *, model_version: str,
                  trust_cfg: TrustConfig | None = None, explain_cfg: ExplainConfig | None = None,
-                 quality_cfg: QualityConfig | None = None, product: str = "default"):
+                 quality_cfg: QualityConfig | None = None, product: str = "default", calibrated=None):
+        """`calibrated` is an enabled CalibratedTrustModel (assay.trust.calibrated), or None for Provisional
+        mode. It is duck-typed here (`enabled`, `predict`, `apply`) because that module imports this one."""
+        if calibrated is not None and not calibrated.enabled:
+            raise ValueError("a calibrated Trust Index can only be used after it passed the section 6 gate")
+        self.calibrated = calibrated
         self.model, self.ref, self.store = model, reference, store
         self.t_low, self.t_high = thresholds["t_low"], thresholds["t_high"]
         self.model_version, self.product = model_version, product
@@ -123,4 +129,11 @@ class TrustAssessor:
             ctx = TrustContext(model_matured_outcomes=self.store.total())
             result = compute_trust_index(comps, self.trust_cfg, ctx)
             out.append(CaseAssessment(ids[i], result, comps, float(novelty[i]), D, q, cohort, ex))
+        if self.calibrated is not None:
+            # Calibrated mode (PRD 5.6). The Insufficient-evidence gates have already run above and are not
+            # reopened: a case with no provisional score keeps its reason codes and gets no calibrated one.
+            scored = self.calibrated.predict(out)
+            for case, p in zip(out, scored, strict=True):
+                case.provisional = case.result
+                case.result = self.calibrated.apply(case, p)
         return out

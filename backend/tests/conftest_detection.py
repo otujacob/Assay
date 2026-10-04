@@ -20,3 +20,17 @@ def make_dataset(seed: int | None = None):
         train_end=START + timedelta(days=100), calibration_end=START + timedelta(days=130),
         reliability_end=START + timedelta(days=165), test_end=START + timedelta(days=200))
     return ds, txns, cfg
+
+
+def make_long_dataset(seed: int):
+    """A longer synthetic dataset: a 135-day test window with the novel fraud type starting at day 270,
+    so there is a stable stretch to fit and calibrate a meta-model on before something new appears.
+    (The standard dataset's test window is 35 days and the novel type starts 5 days into it.)"""
+    gen = replace(GEN, seed=seed, n_days=340, novel_start_day=270)
+    ds = generate(gen)
+    txns = [to_wire(t) for t in ds.transactions]
+    cfg = TrainingConfig(
+        tenant_id="tenant-synth", as_of=START + timedelta(days=gen.n_days), horizon_days=40,
+        train_end=START + timedelta(days=100), calibration_end=START + timedelta(days=130),
+        reliability_end=START + timedelta(days=165), test_end=START + timedelta(days=300))
+    return ds, txns, cfg, START + timedelta(days=gen.novel_start_day)

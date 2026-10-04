@@ -5,7 +5,9 @@ Configuration comes from the environment:
                             assay_app (see README). The service refuses to start on a superuser.
   ASSAY_DEV_CREDENTIALS     JSON list of {"key_id", "tenant_id", "secret", "roles"}. Development
                             only: production credentials belong in the managed secret store.
-  ASSAY_BUNDLES             JSON list of {"tenant_id", "path"}: signed model bundles to load.
+  ASSAY_BUNDLES             JSON list of {"tenant_id", "path"[, "trust_mode"]}: signed model bundles to load.
+                            "trust_mode": "calibrated" turns on the calibrated Trust Index for that tenant; the
+                            server refuses to start unless the bundle's meta-model passed the section 6 gate.
   ASSAY_BUNDLE_SIGNING_KEY  key the bundles were signed with (from the secret store in production).
                             Bundles are verified before they are deserialised.
   ASSAY_MASTER_KEY          master secret (at least 32 characters) for the LOCAL key provider that
@@ -114,7 +116,7 @@ def load_registry(specs: list[dict], key: bytes, provider=None,
         # verifies the signature, decrypts if sealed, then loads
         artefact, manifest = load_bundle(s["path"], s["tenant_id"], key, decrypt_with=provider,
                                          require_encryption=require_encryption)
-        registry.register(s["tenant_id"], artefact, manifest)
+        registry.register(s["tenant_id"], artefact, manifest, trust_mode=s.get("trust_mode", "provisional"))
     return registry
 
 

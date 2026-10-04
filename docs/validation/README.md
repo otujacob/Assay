@@ -90,6 +90,53 @@ the matured outcomes behind it, which is exactly what a pilot would be short of 
 which is the most expensive component to compute, has not shown value on any synthetic run so far.
 That is a product decision for OPD-3 and OPD-7, and should be taken on data separate from this.
 
+## Calibrated Trust Index: is it worth enabling? (twelve seeds, 301 to 312)
+
+Calibrated mode (PRD 5.6) replaces the fixed-weight score with a meta-model's estimate of the chance
+the recommendation is correct, so a score of 80 means "right about 80% of the time". It is built
+(`backend/src/assay/trust/calibrated.py`) and was tested with the same discipline as above: a rule
+written before the runs (docstring of `backend/scripts/validate_calibrated_many_seeds.py`), fresh seeds,
+one analysis. Each seed's test window is split in time: fitted on the oldest 45%, calibrated on the
+next 20%, evaluated on the newest 35%. Reproduce with that script (`run`, then `summarise`).
+
+**One design change, made before the seeds were run.** The first design used the standard dataset. A
+smoke run on seed 300, which is not in the set, showed that only 10 of its 145 errors fell in the oldest
+45% of the window and 1 in the calibration slice, because almost all errors come after the novel fraud
+type appears. The model correctly refused to fit, and the experiment could not have answered anything.
+So the experiment uses a longer dataset (a 135-day test window, novel fraud from day 270). Nothing about
+seeds 301 to 312 informed that choice.
+
+| Question | Result | Rule | Verdict |
+|---|---|---|---|
+| P1 Calibration, stable part | ECE **0.005** against 0.268 for the provisional score read as a probability; improvement +0.264 (interval +0.256 to +0.271) | mean ECE at most 0.03 and better than provisional | **supported** |
+| P2 Ranking errors, stable part | calibrated minus provisional **-0.010** AUROC (interval -0.037 to +0.016); ahead in 5 of 12 | lower bound above -0.02 | **not met** |
+| P3 Ranking errors after novel fraud appears | **-0.003** (interval -0.013 to +0.006); ahead in 4 of 12 | lower bound above -0.02 | non-inferior |
+
+**By the rule written in advance, the verdict is: stay in Provisional mode.** The rule is not
+relaxed because calibration came out so well.
+
+How to read it:
+- **The calibration is real.** The scores are probabilities: 0.005 average error, held after the novel
+  fraud type appeared (0.004), and the High band's observed error was 0.33% against the 1% it was set
+  from. The provisional score read as a probability is off by 0.27, so the mode does what it is for.
+- **The ranking test is unresolved, not lost.** P2 fails because its interval reaches below -0.02, but
+  the same interval includes zero and +0.016. The stable part of each evaluation window is small (a
+  median of about 45 wrong recommendations, and as few as 11 and 17 in two seeds), and those two seeds
+  swing the result (-0.098 and +0.079). The honest summary is "not shown to be as good", not "shown to
+  be worse".
+- **Against B3** it is level on the stable part (+0.002, interval -0.049 to +0.053) and clearly ahead
+  after novelty (+0.024, interval +0.010 to +0.039, ahead in 11 of 12). The rule did not use this.
+- **The PRD 6.6 gate** passes on its own in only **2 of 12** seeds, mostly because beating B3 with an
+  interval that excludes zero is hard on a single evaluation window. The gate is applied in code: a
+  server asked to run a tenant in calibrated mode refuses to start unless the bundle's gate passed.
+- A guess, not a finding: the meta-model learns its weights from only tens of wrong recommendations, so
+  its estimation noise may cost a little ranking. More matured outcomes should shrink it.
+
+What would change the verdict is more matured outcomes (a pilot), not a looser rule. One untested
+alternative is a recalibration-only variant, a monotone mapping of the provisional score. It ranks
+identically by construction, so it could not lose on P2, and it would give the calibration. It would
+need its own pre-set test on fresh seeds. Synthetic data only, as always (PRD 28.3).
+
 ## Component ablations (PRD 6.4), the first two seeds
 
 | Component | Seed 5 | Seed 99 | Reading |

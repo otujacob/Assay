@@ -58,13 +58,24 @@ class BundleRegistry:
         self.explain_cfg = explain_cfg or ExplainConfig()
 
     def register(self, tenant_id: str, artefact: dict, manifest: BundleManifest, *,
-                 champion: bool = True) -> LoadedBundle:
+                 champion: bool = True, trust_mode: str = "provisional") -> LoadedBundle:
+        """`trust_mode="calibrated"` uses the bundle's calibrated meta-model (artefact["trust_meta"]), and
+        is refused unless that model is present and passed the section 6 gate (PRD 5.6, 6.6)."""
         if manifest.tenant_id != tenant_id:
             raise ScoringError("bundle belongs to a different tenant")  # PRD 15.3
+        if trust_mode not in ("provisional", "calibrated"):
+            raise ScoringError(f"unknown trust mode {trust_mode!r}")
         model, ref, store = artefact["model"], artefact["reference"], artefact["store"]
+        meta = None
+        if trust_mode == "calibrated":
+            meta = artefact.get("trust_meta")
+            if meta is None:
+                raise ScoringError("calibrated mode needs a calibrated meta-model, and this bundle has none")
+            if not meta.enabled:
+                raise ScoringError("calibrated mode is refused: the meta-model has not passed the section 6 gate")
         assessor = TrustAssessor(model, ref, store, manifest.thresholds,
                                  model_version=manifest.bundle_id, trust_cfg=self.trust_cfg,
-                                 explain_cfg=self.explain_cfg)
+                                 explain_cfg=self.explain_cfg, calibrated=meta)
         lb = LoadedBundle(manifest, model, ref, store, assessor, len(manifest.feature_names))
         self._bundles[(tenant_id, manifest.bundle_id)] = lb
         if champion:
@@ -218,6 +229,9 @@ class ScoringService:
             "weights_version": r.config_version, "weights_used": {k: _f(v) for k, v in r.weights_used.items()},
             "evidence": {"drift_vector": [_f(v) for v in drift], "explain": explain,
                          "recorded_at": _iso(txn["recorded_at"]), "source_health": self.cfg.source_health,
+                         # the fixed-weight score, kept beside the calibrated one when calibrated mode replaced it
+                         "provisional_ti": (None if ca.provisional is None or ca.provisional.ti is None
+                                            else _f(ca.provisional.ti)),
                          "novelty": _f(ca.novelty), "data_quality": {k: _f(v) for k, v in ca.data_quality.items()},
                          "cohort": asdict(ca.cohort), "bundle_id": lb.manifest.bundle_id}}, actor)
 
