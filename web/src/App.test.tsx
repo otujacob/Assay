@@ -79,7 +79,9 @@ describe("App", () => {
     await screen.findByTestId("case-details");
     fireEvent.change(screen.getByLabelText("Demo user"), { target: { value: "manager" } });
     expect(await screen.findByTestId("kpis")).toHaveTextContent("Total Pending Reviews");
-    expect(await screen.findByTestId("bundle-card").catch(() => null)).toBeNull(); // bundle tab is not the default
+    // The bundle tab is not the default. The dashboard and the bundle load together, so once the KPIs are shown this
+    // is a plain check, not a wait that has to run out its clock to prove something is absent.
+    expect(screen.queryByTestId("bundle-card")).toBeNull();
     fireEvent.click(await screen.findByRole("tab", { name: "Model Bundle & Lineage" }));
     expect(screen.getByTestId("bundle-card")).toHaveTextContent("b-1");
     expect(calls.some((c) => c.user === "manager" && c.path.startsWith("/api/dashboard"))).toBe(true);

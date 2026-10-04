@@ -137,6 +137,37 @@ alternative is a recalibration-only variant, a monotone mapping of the provision
 identically by construction, so it could not lose on P2, and it would give the calibration. It would
 need its own pre-set test on fresh seeds. Synthetic data only, as always (PRD 28.3).
 
+## Counterfactuals: how the engine behaves (a description, not a hypothesis test)
+
+Counterfactuals (`backend/src/assay/trust/counterfactual.py`) answer "what small, realistic change
+would have flipped the model's call?" for an investigator. They are **not** in the Trust Index: the
+explanation component (`exp`) showed no measurable value on any validation run above, and adding more
+to it without evidence would add cost, not trust. They are shown on the case screen on request.
+
+What was measured, on synthetic data (seed 99, the standard dataset), and only to describe behaviour:
+
+| Cases | Had any candidate | Had a counterfactual that passed every check and held up | Usually changed | Time per case |
+|---|---|---|---|---|
+| 100 random flagged cases | 100 | **82** | one thing in 75 of 82 (amount 59, beneficiary 22, time 7, channel 1) | 0.41 s mean, 0.64 s p90 |
+| the 60 highest-risk unflagged cases | 60 | **57** | one thing in 56 of 57 (amount 41, beneficiary 17) | 0.39 s mean, 0.73 s p90 |
+
+"Passed every check" means the independent validator found that re-scoring flips the call by a margin,
+every value is inside the data's bounds, the customer's history and the data's completeness are
+untouched, the amount group is internally consistent, at most two groups changed, the move is small,
+and the flip survives small perturbations. In the other 18 flagged cases the call is firm: no realistic
+change flips it, and the screen says so.
+
+Limits to keep in mind:
+- A counterfactual describes the **model**, not cause and effect (PRD 7.4). That amount is what the
+  model leans on most says what it learned from synthetic data, not what fraud depends on.
+- Pairs of changes are shortlisted by the boosted trees alone, so a flip the shortlist ranks low can be
+  missed. A counterfactual that is reported was always scored by the full model.
+- The full model is single-threaded, so replays are exact, which makes this about 0.4 s per case. That
+  is fine for an investigator's click and far too slow to compute for every case.
+- Cross-method consistency (SHAP against a permutation importance on the whole ensemble) is shown per
+  case but has not been summarised across cases here. Some disagreement is expected by design, because
+  the permutation view includes the random forest and isolation forest that SHAP here does not.
+
 ## Component ablations (PRD 6.4), the first two seeds
 
 | Component | Seed 5 | Seed 99 | Reading |

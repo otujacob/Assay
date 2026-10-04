@@ -37,6 +37,7 @@ if (await blindRow.count()) {
   await page.waitForSelector("[data-testid=blind-notice]");
   check("blind case withholds score, trust and recommendation", (await page.locator("[data-testid=risk-card]").count()) === 0 && (await page.locator("[data-testid=recommendation]").count()) === 0);
   await page.screenshot({ path: "screenshots/04-blind-case.png" });
+  check("a blind case offers no what-if", (await page.locator("[data-testid=counterfactuals]").count()) === 0);
 } else {
   console.log("SKIP  no blind case in the demo queue");
 }
@@ -49,6 +50,16 @@ check("a normal case shows the Fraud Risk Score and Trust Index", (await page.lo
 const gauge = await text("[data-testid=trust-gauge]");
 check("insufficient evidence is never shown as a number", !/Insufficient evidence/i.test(gauge) || !/\b\d+\s*\/\s*100/.test(gauge), gauge.slice(0, 80));
 check("recommendation says recommend-only", /recommend-only/.test(await text("[data-testid=recommendation]")));
+
+// --- analyst: what would change the decision? (counterfactuals, PRD 7.1) -------------------------------------------
+check("what-ifs are not worked out until asked", (await page.locator("[data-testid=cf-note]").count()) === 0);
+await page.getByRole("button", { name: "Show what-ifs" }).click();
+await page.waitForSelector("[data-testid=cf-note]", { timeout: 60000 });
+const cfText = await text("[data-testid=counterfactuals]");
+check("the what-if card always says it describes the model, not cause and effect", /describes the MODEL, not cause and effect/.test(cfText) && /must not be given to a customer/.test(cfText));
+check("the what-if card says either what would flip the call or that none exists", (await page.locator("[data-testid=cf-list]").count()) === 1 || (await page.locator("[data-testid=cf-none]").count()) === 1 || /none held up/.test(cfText), cfText.slice(0, 120));
+check("the what-if card shows how far two explanation methods agree", /Two methods agree \d+%/.test(await text("[data-testid=cf-methods]")));
+await page.locator("[data-testid=counterfactuals]").screenshot({ path: "screenshots/11-what-if.png" });
 
 await page.getByRole("button", { name: /Override AI/ }).click();
 await page.getByRole("button", { name: "Submit override" }).click();

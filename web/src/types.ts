@@ -285,3 +285,28 @@ export interface DemoUser {
   label: string;
   roles: string[];
 }
+
+export interface CounterfactualChange { feature: string; from: number; to: number; text: string }
+
+export interface CounterfactualItem {
+  groups: string[];
+  changes: CounterfactualChange[];
+  risk_before: number;
+  risk_after: number;
+  distance: number;
+  valid: boolean;
+  robust_share: number | null;
+  failed_checks: string[];
+}
+
+/** What small, realistic changes would have flipped the model's call, for an investigator (PRD 7.1). */
+export interface CounterfactualView {
+  decision_id: string;
+  risk: number;
+  threshold: number;
+  flagged: boolean;
+  counterfactuals: CounterfactualItem[];
+  summary: { found: number; valid?: number; score: number | null };
+  note: string;
+  cross_method: { agreement: number; shap_drivers: string[]; permutation_drivers: string[] };
+}

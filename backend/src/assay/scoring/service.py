@@ -29,6 +29,10 @@ from assay.ingestion.repo import DuplicateError
 from assay.policy import Action, PolicyInput, PolicyService, evaluate
 from assay.trust import Component, TrustConfig
 from assay.trust.assessor import CaseAssessment, TrustAssessor
+from assay.trust.counterfactual import CounterfactualConfig
+from assay.trust.counterfactual import generate as cf_generate
+from assay.trust.counterfactual import view as cf_view
+from assay.trust.crossmethod import cross_method
 from assay.trust.explain import ExplainConfig
 
 SCHEMA = "dec-1"
@@ -345,6 +349,28 @@ class ScoringService:
                  "metrics": r["manifest"].get("metrics"), "calibration": r["manifest"].get("calibration"),
                  "created_at": r["manifest"].get("created_at"),
                  "feature_set_version": r["manifest"].get("feature_set_version")} for r in rows]
+
+    def counterfactuals(self, tenant_id: str, decision_id: str, reader: str = "system") -> dict:
+        """What small, realistic changes would have flipped the model's call, and whether two explanation
+        methods agree on what drove it (PRD 7.1, V1). Computed on demand from the stored feature vector and the
+        model version that scored it, so it is the same every time. Reading it is audited (FR-43)."""
+        pd = self._decision_row(tenant_id, decision_id)
+        ta = self.repo.get_by_id(tenant_id, "trust_assessments", pd["trust_assessment_id"])
+        pr = self.repo.get_by_id(tenant_id, "predictions", ta["prediction_id"])
+        fv = self.repo.get_by_id(tenant_id, "feature_vectors", pr["feature_vector_id"])
+        lb = self.registry.get(tenant_id, pr["bundle_id"])
+        x = np.array(fv["feature_values"], dtype=float)
+        t_high = float(lb.manifest.thresholds["t_high"])
+        cfg = CounterfactualConfig(seed=zlib.crc32(pd["txn_id"].encode()))
+        cfs = cf_generate(lb.model, lb.reference, x, t_high, cfg)
+        cm = cross_method(lb.model, x[None, :], lb.reference, [pd["txn_id"]])
+        out = cf_view(cfs, x, float(pr["calibrated_risk"]), t_high)
+        out |= {"decision_id": decision_id,
+                "cross_method": {"agreement": float(cm["agreement"][0]), "shap_drivers": cm["shap_drivers"][0],
+                                 "permutation_drivers": cm["permutation_drivers"][0]}}
+        self.repo.append_audit(tenant_id, reader, "counterfactuals_read", pd["txn_id"],
+                               f"{len(cfs)} found", self.cfg.clock())
+        return out
 
     def audit_log(self, tenant_id: str, reader: str, **filters) -> dict:
         """Search the audit log (FR-34). Reading it is itself audited (FR-43). `reader` is who is

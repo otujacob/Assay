@@ -103,14 +103,14 @@ before loading it. `ASSAY_DEV_CREDENTIALS` is for development only.
 | E0 Foundations | repo, CI, ADR 0001, synthetic data generator: done |
 | E1 Ingestion and lineage | validation, idempotency, quarantine, maturity, late events, hash chain, tenant isolation (row-level security): done, tested on memory and real PostgreSQL 16 |
 | E2 Features and detection | point-in-time features with leakage check, ensemble, calibration, signed tenant-bound bundles: done |
-| E3 Explanation | TreeSHAP attributions with stability, sensitivity, faithfulness, reproducibility: done (boosted-tree members only) |
+| E3 Explanation | TreeSHAP attributions with stability, sensitivity, faithfulness, reproducibility: done (boosted-tree members only). Counterfactuals ("what would change the decision?", PRD 7.1) and a SHAP-versus-permutation cross-method check are built and shown to investigators on request; they are **not** part of the Trust Index. On synthetic seed 99, 82 of 100 flagged cases had a counterfactual that passed every check, at about 0.4 s per case ([docs/validation/README.md](docs/validation/README.md)). They describe the model, not cause and effect, and must not be given to customers |
 | E4 Trust Index | all six components plus the assessor, Insufficient-evidence state, async refinement: done. `hum` inactive in the MVP by design. Calibrated mode (PRD 5.6) is built and gated in code, but **not enabled**: on twelve fresh synthetic seeds it is well calibrated but was not shown to rank errors as well as the provisional score ([docs/validation/README.md](docs/validation/README.md)) |
 | E5 Policy and review | policy engine, versioned policies with second-person approval (FR-21) that can set risk thresholds and an "always review amounts from" rule, policy replay (preview a proposed policy's effect on review volume against the policy in force; it does not predict fraud caught or analyst decisions). A policy that sets its own risk thresholds replaces the model's, so the validation figures, measured at the model's thresholds, no longer describe it, queue with priority and SLA, blind review, reason codes, conflicts and adjudication: done |
 | E6 Feedback capture | decisions, blind flag, checklist, shadow scores AAS/FCS/LVS/CRS/FQS: done. Nothing trains on them |
 | E7 Validation harness and dashboard | baselines B1 to B4, ablations, four accuracy measures, stress tests, stored reports, dashboard summary: done |
 | E8 Lineage completion | every decision step is an append-only record; replay reproduces decisions; audit-log search and CSV/JSON export (FR-34) with an auditor UI panel: done (tested on the in-memory store; the PostgreSQL path is unexercised) |
 | E9 Security and tenancy | tenant isolation, signed requests, roles, non-superuser enforcement, rate limiting, access events in the audit log (FR-43), CI secret and dependency scans (FR-44): done. Per-tenant encryption (FR-41): model bundles and audit exports, with a local key provider ([docs/security/key-management.md](docs/security/key-management.md)). Single sign-on and MFA (FR-42): token verification built and tested with generated tokens, **not tested against a real identity provider**, and the web app has no sign-in flow yet ([docs/security/sso.md](docs/security/sso.md)). A managed key service, SAML, the independent penetration test: **not done** |
-| Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs, policy proposal and approval, auditor log: done. 73 unit tests; the browser end-to-end check (`web/scripts/e2e.mjs`) has not been rerun since the policy and audit panels were added |
+| Web app | review queue, case view, Trust Index gauge, component bars, drivers, actions, governance tabs, policy proposal and approval, auditor log, on-demand what-ifs: done. 125 unit tests; the browser end-to-end check (`web/scripts/e2e.mjs`) passes against the demo server |
 
 ## What the validation found
 On synthetic data the Trust Index beats the two simplest uncertainty baselines (B1, B2) clearly, and
@@ -140,7 +140,7 @@ about real fraud. Details, five method changes made along the way, and the limit
 - **Institution hard rules** (sanctions holds) have a hook but no rule source.
 - **Analyst reason codes** are working defaults, not agreed with a fraud-operations adviser.
 - **Noisy-analyst-label stress test** is reported as not testable (needs the feedback engine's learning side, V1).
-- **Not built (later phases):** counterfactuals, graph store, automation above level 0,
+- **Not built (later phases):** graph store, automation above level 0,
   AI copilot, regulator export views.
 - **Calibrated mode exists but should stay off.** It produces genuine probabilities, but did not meet the
   pre-set ranking test, and passed the PRD gate in 2 of 12 synthetic seeds. A pilot's matured outcomes are

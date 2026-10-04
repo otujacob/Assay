@@ -285,6 +285,15 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
             raise HTTPException(404, {"code": "explanation_pending"})
         return e
 
+    @app.get("/v1/decisions/{decision_id}/counterfactuals")
+    def get_counterfactuals(decision_id: str, auth=Depends(authed)):
+        """What small, realistic changes would have flipped the model's call, for an investigator (PRD 7.1).
+        Same access rules as the explanation, including blind review. Computed on demand; reading is audited."""
+        cred, _ = auth
+        need(cred, "analyst", "auditor")
+        blind_guard(cred, decision_id)
+        return with_scoring(cred, lambda sc: sc.counterfactuals(cred.tenant_id, decision_id, f"api:{cred.key_id}"))
+
     @app.get("/v1/decisions/{decision_id}/lineage")
     def get_lineage(decision_id: str, auth=Depends(authed)):
         cred, _ = auth

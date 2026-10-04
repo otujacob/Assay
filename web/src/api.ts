@@ -1,5 +1,5 @@
 import type {
-  ActionRequest, ActionResponse, AuditResponse, BundleInfo, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
+  ActionRequest, ActionResponse, AuditResponse, BundleInfo, CounterfactualView, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -96,6 +96,7 @@ const auditQs = (f: AuditFilters, format?: "csv"): string => {
 };
 
 export const api = {
+  counterfactuals: (decisionId: string) => call<CounterfactualView>("GET", `/decisions/${decisionId}/counterfactuals`),
   policies: () => call<{ items: PolicyVersion[] }>("GET", "/config/policies"),
   proposePolicy: (body: PolicyRequest) => call<PolicyVersion>("POST", "/config/policies", body),
   previewPolicy: (body: PolicyRequest) => call<PolicyPreview>("POST", "/config/policies/preview", body),
