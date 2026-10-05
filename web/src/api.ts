@@ -1,6 +1,6 @@
 import { getToken } from "./auth/oidc";
 import type {
-  ActionRequest, ActionResponse, AuditResponse, BundleInfo, Candidate, CounterfactualView, FeedbackPool, GraphView, LearningStatus, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
+  ActionRequest, ActionResponse, AuditResponse, BundleInfo, Candidate, CaseSummaryView, CounterfactualView, FeedbackPool, GraphView, LearningStatus, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -112,6 +112,7 @@ export type CandidateStep = "shadow" | "approve" | "canary" | "promote" | "rollb
 export interface FlagEdgeRequest { relationship: string; src: string; dst: string; reason: string }
 
 export const api = {
+  summary: (decisionId: string) => call<CaseSummaryView>("GET", `/decisions/${decisionId}/summary`),
   me: () => call<{ subject: string; tenant: string; roles: string[]; method: string }>("GET", "/me"),
   graph: (decisionId: string) => call<GraphView>("GET", `/decisions/${decisionId}/graph`),
   flagEdge: (body: FlagEdgeRequest) => call<{ flagged: boolean }>("POST", "/graph/edges/flag", body),

@@ -51,6 +51,15 @@ const gauge = await text("[data-testid=trust-gauge]");
 check("insufficient evidence is never shown as a number", !/Insufficient evidence/i.test(gauge) || !/\b\d+\s*\/\s*100/.test(gauge), gauge.slice(0, 80));
 check("recommendation says recommend-only", /recommend-only/.test(await text("[data-testid=recommendation]")));
 
+// --- analyst: a rule-written case summary (no language model) -----------------------------------------------------------
+check("the summary is not built until asked", (await page.locator("[data-testid=summary-note]").count()) === 0);
+await page.getByRole("button", { name: "Summarise this case" }).click();
+await page.waitForSelector("[data-testid=summary-note]", { timeout: 60000 });
+const sumText = await text("[data-testid=case-summary]");
+check("the summary states the model's risk and threshold and that no language model was used", /put the risk at \d+\.\d%/.test(sumText) && /no language model was used/.test(sumText), sumText.slice(0, 120));
+check("it lists what it does not cover", /Not covered:/.test(sumText));
+await page.locator("[data-testid=case-summary]").screenshot({ path: "screenshots/17-case-summary.png" });
+
 // --- analyst: what would change the decision? (counterfactuals, PRD 7.1) -------------------------------------------
 check("what-ifs are not worked out until asked", (await page.locator("[data-testid=cf-note]").count()) === 0);
 await page.getByRole("button", { name: "Show what-ifs" }).click();

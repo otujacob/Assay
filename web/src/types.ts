@@ -414,3 +414,14 @@ export interface GraphView {
   reliability_note: string | null;
   note: string;
 }
+
+/** A case summary written by fixed rules from the stored record: no language model (PRD 19, V2 copilot, first step). */
+export interface CaseSummaryView {
+  decision_id: string;
+  version: string;
+  paragraph: string;
+  facts: { text: string; source: string; ref: string[] }[];
+  sources: string[];
+  not_covered: string[];
+  note: string;
+}

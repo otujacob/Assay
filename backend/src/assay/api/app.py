@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from assay import audit
 from assay.api.limits import RateLimiter
 from assay.auth import AuthError
+from assay.copilot.service import CaseSummaryService
 from assay.graph.service import GraphCache, GraphError, GraphService
 from assay.ingestion import IngestionService
 from assay.learning.killswitch import KillSwitchError
@@ -320,6 +321,15 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
             raise HTTPException(e.http, {"code": e.code, "detail": str(e)}) from None
         except ScoringError as e:
             raise HTTPException(404, {"code": "not_found", "detail": str(e)}) from None
+
+    @app.get("/v1/decisions/{decision_id}/summary")
+    def get_summary(decision_id: str, auth=Depends(authed)):
+        """A short, sourced summary of the case, written by fixed rules from the stored record. No language model is used and
+        nothing leaves the system. Same access rules as the explanation, including blind review; reading is audited."""
+        cred, _ = auth
+        need(cred, "analyst", "auditor")
+        blind_guard(cred, decision_id)
+        return with_scoring(cred, lambda sc: CaseSummaryService(sc, graph_cache).summary(cred.tenant_id, decision_id, f"api:{cred.key_id}"))
 
     @app.get("/v1/me")
     def me(auth=Depends(authed)):

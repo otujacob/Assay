@@ -3,6 +3,7 @@ import type { ActionRequest, ActionResponse, CaseView } from "../types";
 import { RECOMMENDATION_LABEL, formatTime, money, num, pct } from "../lib/format";
 import { ActionPanel } from "./ActionPanel";
 import { ComponentBars } from "./ComponentBars";
+import { CaseSummary } from "./CaseSummary";
 import { CounterfactualCard } from "./CounterfactualCard";
 import { LinkedEntities } from "./LinkedEntities";
 import { Pill, PriorityPill, RiskPill } from "./Pill";
@@ -54,6 +55,7 @@ export function CaseDetails({
         </div>
       ) : (
         <>
+          <CaseSummary key={`s-${view.decision_id}`} decisionId={view.decision_id} />
           <div className="two-col">
             <div className="card risk-card" data-testid="risk-card">
               <div className="card-title">Fraud Risk Score</div>
