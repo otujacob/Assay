@@ -157,4 +157,5 @@ def test_health_is_readable_by_governance_roles_and_empty_when_nothing_is_live(a
     api["candidate"]()
     for key, code in (("adm", 200), ("apr", 200), ("aud", 200), ("mgr", 200), ("ana", 403), ("ing", 403)):
         assert api["call"]("GET", "/v1/learning/health", key).status_code == code, key
-    assert api["call"]("GET", "/v1/learning/health", "aud").json() == {"items": []}  # a validated candidate decides nothing
+    items = api["call"]("GET", "/v1/learning/health", "aud").json()["items"]
+    assert [i["bundle_id"] for i in items] == [api["champion"]]  # only the model actually deciding; a validated candidate decides nothing

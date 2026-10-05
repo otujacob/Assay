@@ -56,7 +56,7 @@ def test_plpgsql_functions_parse():
 
 def test_every_table_has_tenant_id_and_chain_columns():
     tables = tables_created(ALL)
-    assert len(tables) == 22
+    assert len(tables) == 23
     for name, cols in tables.items():
         assert {"tenant_id", "prev_hash", "row_hash", "payload_hash", "created_by"} <= cols, name
 

@@ -41,6 +41,17 @@ matured cases there is no verdict. It only ever rolls back, to a known-good mode
 limits are working defaults (OPD-12). In a test, a deliberately degraded canary was rolled back and a healthy or thinly evidenced one
 was left alone; no real traffic has been monitored, and outcomes arrive late, so detection lags by the label delay.
 
+## The kill switch (`assay/learning/killswitch.py`, PRD 12.4)
+
+For when no model can be trusted. While it is engaged for a tenant, every new case goes to a person (gate `kill_switch`, checked before
+any rule or the model's call), whatever the model says. Scoring still runs and is stored, so lineage is complete; earlier decisions are
+not changed. An administrator or approver can engage it (stopping reliance on the model is the safe direction); only an approver can
+release it; both need a stored reason; it is an append-only log (`kill_switch_events`) and every change is in the audit log. The
+degradation monitor engages it by itself when the only model in use (no candidate to roll back from) breaches its limits, as
+`system:monitor` with the evidence as the reason. Releasing is always a person's act. Shown in the Model Updates panel. It stops the
+model deciding; it does not stop transactions being scored, and the queue must be staffed for the extra volume (the effect on review
+volume is the same as policy replay would show for "review everything").
+
 ## What the database refuses, in addition to the service
 
 - an approval by the person who created the candidate (a check on the row, and a foreign key stops a caller lying
@@ -92,8 +103,6 @@ accept threshold, the corroboration requirement and the gate tolerances should b
 
 - Schedules or triggers that create candidates (OPD-13). A person runs `create`.
 - Bounded automatic recalibration (V1 in the PRD), and any automatic promotion.
-- A kill switch that falls back to human review for all cases when no safe bundle exists. Rollback restores the
-  previous champion only.
 - Automatic rollback for a data-quality or operational incident (PRD 12.4). Drift alarms are reported by the drift job; an
   operational incident is a person's call.
 - Approval authority is a role (`approver`). Whether that is the institution's model risk owner, Assay, or both is

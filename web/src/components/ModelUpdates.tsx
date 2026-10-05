@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type CandidateStep } from "../api";
-import type { Candidate, CandidateState, FeedbackPool, Gate, LearningStatus } from "../types";
+import type { Candidate, CandidateState, FeedbackPool, Gate, KillSwitchState, LearningStatus } from "../types";
 import { formatTime } from "../lib/format";
 import { Pill, type Tone } from "./Pill";
 
@@ -170,6 +170,41 @@ function CandidateCard({ c, me, roles, onChanged }: {
   );
 }
 
+/** Stop relying on the model: every new case goes to a person (PRD 12.4). Anyone with authority may engage it; only an approver releases it. */
+function KillSwitchPanel({ ks, roles, onChanged }: { ks: KillSwitchState; roles: ReadonlySet<string>; onChanged: () => Promise<void> }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const can = ks.engaged ? roles.has("approver") : roles.has("admin") || roles.has("approver");
+  const go = (action: "engage" | "release") => {
+    setBusy(true);
+    api.killSwitch(action, reason)
+      .then(() => { setReason(""); setError(null); return onChanged(); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className={ks.engaged ? "banner-error" : "pad small"} data-testid="kill-switch" role={ks.engaged ? "alert" : undefined}>
+      {ks.engaged ? (
+        <><b>Kill switch engaged.</b> Every new case goes to a person, whatever the model says. Reason: {ks.reason} ({ks.by}).</>
+      ) : (
+        <span className="muted">Kill switch off: the model's recommendations apply.</span>
+      )}
+      {can && (
+        <div className="filters filters-row">
+          <label className="field-wide">{ks.engaged ? "Why it is safe to release" : "Why the model should not be relied on now"}
+            <input aria-label="Kill switch reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </label>
+          <button type="button" className="btn ghost" disabled={busy || !reason.trim()} onClick={() => go(ks.engaged ? "release" : "engage")}>
+            {ks.engaged ? "Release kill switch" : "Engage kill switch"}
+          </button>
+        </div>
+      )}
+      {error && <div className="error" role="alert">{error}</div>}
+    </div>
+  );
+}
+
 /** Candidate models and the feedback behind them (PRD 11, 12). Nothing here happens by itself: each step is a person's. */
 export function ModelUpdates({ userKey, roles }: { userKey: string; roles: ReadonlySet<string> }) {
   const [status, setStatus] = useState<LearningStatus | null>(null);
@@ -199,6 +234,7 @@ export function ModelUpdates({ userKey, roles }: { userKey: string; roles: Reado
         traffic as a canary, and only then be promoted. The previous champion stays deployable and a rollback restores it.
       </div>
       {error && <div className="banner-error" role="alert">{error}</div>}
+      {status?.kill_switch && <KillSwitchPanel ks={status.kill_switch} roles={roles} onChanged={load} />}
       {status && (
         <div className="pad small" data-testid="learning-status">
           Champion <span className="mono">{status.champion ?? "none"}</span>

@@ -70,6 +70,7 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "shadow_scores": ("schema_version", "txn_id", "candidate_id", "champion_id", "candidate_risk",
                       "champion_risk", "candidate_call", "champion_call"),
     "graph_edge_flags": ("schema_version", "rel", "src", "dst", "reason", "flagged_at"),
+    "kill_switch_events": ("schema_version", "kind", "reason"),
     "drift_runs": ("schema_version", "bundle_id", "n_reference", "n_window", "window_start",
                    "window_end", "feature_names", "drift", "max_drift", "alarm_level", "alarm"),
 }

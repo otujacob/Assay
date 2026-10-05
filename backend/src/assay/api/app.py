@@ -33,6 +33,7 @@ from assay.api.limits import RateLimiter
 from assay.auth import AuthError
 from assay.graph.service import GraphCache, GraphError, GraphService
 from assay.ingestion import IngestionService
+from assay.learning.killswitch import KillSwitchError
 from assay.learning.lifecycle import LifecycleError
 from assay.learning.service import LearningConfig, LearningService
 from assay.policy import PolicyError, PolicyService
@@ -529,7 +530,7 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         try:
             with scorer() as sc:
                 return fn(LearningService(sc.repo, sc, learning))
-        except LifecycleError as e:
+        except (LifecycleError, KillSwitchError) as e:
             raise HTTPException(e.http, {"code": e.code, "detail": str(e)}) from None
         except ScoringError as e:
             raise HTTPException(404, {"code": "not_found", "detail": str(e)}) from None
@@ -602,6 +603,23 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         need(cred, "approver")
         reason = str(body_object(body).get("reason") or "")
         return with_learning(lambda ls: ls.rollback(cred.tenant_id, f"u:{cred.key_id}", candidate_id, reason))
+
+    @app.post("/v1/learning/kill-switch/engage")
+    def kill_switch_engage(auth=Depends(authed)):
+        """Send every new case to a person, whatever the model says (PRD 12.4). Stopping reliance on the model is the safe
+        direction, so an administrator or an approver may do it. A reason is stored."""
+        cred, body = auth
+        need(cred, "admin", "approver")
+        return with_learning(lambda ls: ls.kill_switch().engage(
+            cred.tenant_id, f"u:{cred.key_id}", str(body_object(body).get("reason") or "")))
+
+    @app.post("/v1/learning/kill-switch/release")
+    def kill_switch_release(auth=Depends(authed)):
+        """Go back to the model's recommendations. Only an approver, with a stored reason."""
+        cred, body = auth
+        need(cred, "approver")
+        return with_learning(lambda ls: ls.kill_switch().release(
+            cred.tenant_id, f"u:{cred.key_id}", str(body_object(body).get("reason") or "")))
 
     @app.get("/v1/learning/health")
     def learning_health(auth=Depends(authed)):

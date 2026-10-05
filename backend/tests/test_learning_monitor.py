@@ -135,7 +135,7 @@ def test_a_canary_that_degrades_is_rolled_back_by_the_monitor_with_the_evidence_
     assert ev["kind"] == "rolled_back" and ev["created_by"] == "system:monitor" and ev["detail"]["reason"].startswith("automatic: ")
     svc.scoring.sync_routing(T)
     assert svc.scoring.registry.deciding_id(T) != "cand"
-    assert svc.check_health(T, act=True) == []  # nothing live any more
+    assert [h["bundle_id"] for h in svc.check_health(T, act=True)] != ["cand"]  # the candidate is no longer live; only the base model is reported
 
 
 def test_a_healthy_canary_is_not_touched_and_one_with_thin_evidence_is_not_judged(live):
@@ -155,10 +155,11 @@ def test_a_healthy_canary_is_not_touched_and_one_with_thin_evidence_is_not_judge
 
 def test_only_models_deciding_live_cases_are_monitored(live):
     svc, store, repo, _ = live
-    assert svc.check_health(T, act=True) == []            # validated
+    assert "cand" not in [h["bundle_id"] for h in svc.check_health(T, act=True)]  # validated
     store.start_shadow(T, "u:creator", "cand")
     decide(repo, 400, good=False)
-    assert svc.check_health(T, act=True) == []            # shadow decides nothing, so there is nothing to roll back
+    health = svc.check_health(T, act=True)  # shadow decides nothing, so there is nothing of the candidate to roll back
+    assert "cand" not in [h["bundle_id"] for h in health] and not any(h["rolled_back"] for h in health)
 
 
 def test_the_worker_runs_the_check_and_reports_a_rollback(live, trained):

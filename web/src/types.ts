@@ -355,7 +355,10 @@ export interface Candidate {
   shadow?: ShadowReport;
 }
 
+export interface KillSwitchState { engaged: boolean; last?: string; reason?: string; by?: string }
+
 export interface LearningStatus {
+  kill_switch?: KillSwitchState;
   champion: string | null;
   shadow: string | null;
   canary: { candidate: string; share: number } | null;

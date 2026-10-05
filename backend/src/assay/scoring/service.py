@@ -26,6 +26,7 @@ from assay.detection.bundle import BundleManifest
 from assay.features import FEATURE_SET_VERSION, compute_features, definition_versions, feature_names
 from assay.features.compute import parse_time
 from assay.ingestion.repo import DuplicateError
+from assay.learning.killswitch import KillSwitch
 from assay.learning.lifecycle import LifecycleStore, Routing, in_canary
 from assay.policy import Action, PolicyInput, PolicyService, evaluate
 from assay.trust import Component, TrustConfig
@@ -304,7 +305,7 @@ class ScoringService:
             t_high=lb.manifest.thresholds["t_high"], default_version=self.cfg.policy_version)
         hard = self.cfg.hard_rule(txn) if self.cfg.hard_rule else None
         res = evaluate(PolicyInput(_f(risk), ca.result.state, ca.result.reason_codes, hard,
-                                   amount=_f(txn["amount"])), pcfg)
+                                   amount=_f(txn["amount"]), kill_switch=KillSwitch(self.repo).engaged(tenant_id)), pcfg)
         return self.repo.insert(tenant_id, "policy_decisions", {
             "schema_version": SCHEMA, "txn_id": txn["txn_id"], "trust_assessment_id": ta["id"],
             "policy_version": res.policy_version, "risk_band": res.risk_band.value, "gate": res.gate,

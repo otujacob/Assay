@@ -65,7 +65,8 @@ def preview(repo, tenant_id: str, payload: dict, baseline: dict | None, *, limit
             continue
         hard = Action(pd["recommended_action"]) if pd["gate"] == "hard_rule" else None
         inp = PolicyInput(float(pr["calibrated_risk"]), TrustState(ta["state"]),
-                          tuple(ReasonCode(c) for c in ta["reason_codes"]), hard, amount=float(txn["amount"]))
+                          tuple(ReasonCode(c) for c in ta["reason_codes"]), hard, amount=float(txn["amount"]),
+                          kill_switch=pd["gate"] == "kill_switch")
         old = evaluate(inp, config_from_payload(base_payload, base_version, t_low=thr["t_low"], t_high=thr["t_high"]))
         new = evaluate(inp, config_from_payload(payload, "preview", t_low=thr["t_low"], t_high=thr["t_high"]))
         actions["before"][old.action.value] += 1

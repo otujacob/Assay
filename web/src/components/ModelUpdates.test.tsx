@@ -157,3 +157,49 @@ describe("ModelUpdates", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load model updates");
   });
 });
+
+describe("kill switch", () => {
+  const withKs = (ks: object) => ({ ...status, kill_switch: ks });
+
+  it("says plainly when it is off, and lets an administrator engage it with a reason", async () => {
+    setup([], withKs({ engaged: false }) as LearningStatus);
+    const call = vi.spyOn(api, "killSwitch").mockResolvedValue({ engaged: true });
+    render(<ModelUpdates userKey="admin" roles={roles("admin")} />);
+    expect(await screen.findByTestId("kill-switch")).toHaveTextContent("Kill switch off");
+    const btn = screen.getByRole("button", { name: "Engage kill switch" });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Kill switch reason"), { target: { value: "drift incident" } });
+    fireEvent.click(btn);
+    await waitFor(() => expect(call).toHaveBeenCalledWith("engage", "drift incident"));
+  });
+
+  it("shows it loudly when engaged, and only an approver may release it", async () => {
+    setup([], withKs({ engaged: true, reason: "model degraded", by: "system:monitor" }) as LearningStatus);
+    const { unmount } = render(<ModelUpdates userKey="admin" roles={roles("admin")} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Every new case goes to a person");
+    expect(screen.getByRole("alert")).toHaveTextContent("system:monitor");
+    expect(screen.queryByRole("button", { name: "Release kill switch" })).not.toBeInTheDocument();
+    unmount();
+    const call = vi.spyOn(api, "killSwitch").mockResolvedValue({ engaged: false });
+    render(<ModelUpdates userKey="approver" roles={roles("approver")} />);
+    fireEvent.change(await screen.findByLabelText("Kill switch reason"), { target: { value: "fixed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Release kill switch" }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith("release", "fixed"));
+  });
+
+  it("an auditor can see it but not change it", async () => {
+    setup([], withKs({ engaged: false }) as LearningStatus);
+    render(<ModelUpdates userKey="auditor" roles={roles("auditor")} />);
+    await screen.findByTestId("kill-switch");
+    expect(screen.queryByRole("button", { name: "Engage kill switch" })).not.toBeInTheDocument();
+  });
+
+  it("shows the server's refusal", async () => {
+    setup([], withKs({ engaged: false }) as LearningStatus);
+    vi.spyOn(api, "killSwitch").mockRejectedValue(new Error("the kill switch is already engaged"));
+    render(<ModelUpdates userKey="admin" roles={roles("admin")} />);
+    fireEvent.change(await screen.findByLabelText("Kill switch reason"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Engage kill switch" }));
+    expect(await screen.findByText("the kill switch is already engaged")).toBeInTheDocument();
+  });
+});

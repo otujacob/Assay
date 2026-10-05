@@ -20,6 +20,7 @@ from assay.detection import TrainingConfig, train_bundle
 from assay.detection.bundle import save_bundle
 from assay.learning import gates as G
 from assay.learning import monitor as mon
+from assay.learning.killswitch import KillSwitch
 from assay.learning.lifecycle import LifecycleConfig, LifecycleError, LifecycleStore
 from assay.learning.pool import POOL_VERSION, PoolConfig, PoolReport, assess
 from assay.review.service import _family
@@ -175,12 +176,30 @@ class LearningService:
                 self.rollback(tenant_id, actor, cid, "automatic: " + "; ".join(rep["triggers"]))
                 rep["rolled_back"] = True
             out.append(rep)
+        if not out:  # nothing but the model the process started with is live: there is nothing to roll back TO
+            bid = self.scoring.registry.deciding_id(tenant_id)
+            if bid:
+                lb = self.scoring.registry.get(tenant_id, bid)
+                risk, fraud, high = mon.collect(self.repo, tenant_id, bid)
+                rep = mon.evaluate(bid, risk, fraud, high, float(lb.manifest.thresholds["t_high"]),
+                                   (lb.manifest.metrics or {}).get("at_t_high"), self.cfg.monitor).as_dict()
+                rep["rolled_back"] = False
+                rep["kill_switch_engaged"] = False
+                ks = KillSwitch(self.repo, self.cfg.lifecycle.clock)
+                if act and rep["status"] == "breach" and not ks.engaged(tenant_id):
+                    ks.engage(tenant_id, actor, "automatic: " + "; ".join(rep["triggers"]) + " (no safe model to fall back to)")
+                    rep["kill_switch_engaged"] = True
+                out.append(rep)
         return out
+
+    def kill_switch(self) -> KillSwitch:
+        return KillSwitch(self.repo, self.cfg.lifecycle.clock)
 
     def status(self, tenant_id: str) -> dict:
         self.scoring.sync_routing(tenant_id)
         r = self.scoring.registry._routing.get(tenant_id)
-        return {"champion": self.scoring.registry.deciding_id(tenant_id),
+        return {"kill_switch": KillSwitch(self.repo, self.cfg.lifecycle.clock).state(tenant_id),
+                "champion": self.scoring.registry.deciding_id(tenant_id),
                 "shadow": r.shadow if r else None,
                 "canary": {"candidate": r.canary, "share": r.canary_share} if r and r.canary else None,
                 "candidates": len(self.store.candidates(tenant_id))}

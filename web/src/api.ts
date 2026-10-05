@@ -115,6 +115,8 @@ export const api = {
   me: () => call<{ subject: string; tenant: string; roles: string[]; method: string }>("GET", "/me"),
   graph: (decisionId: string) => call<GraphView>("GET", `/decisions/${decisionId}/graph`),
   flagEdge: (body: FlagEdgeRequest) => call<{ flagged: boolean }>("POST", "/graph/edges/flag", body),
+  killSwitch: (action: "engage" | "release", reason: string) =>
+    call<{ engaged: boolean }>("POST", `/learning/kill-switch/${action}`, { reason }),
   learningStatus: () => call<LearningStatus>("GET", "/learning/status"),
   feedbackPool: () => call<FeedbackPool>("GET", "/learning/feedback-pool"),
   candidates: () => call<{ items: Candidate[] }>("GET", "/learning/candidates"),

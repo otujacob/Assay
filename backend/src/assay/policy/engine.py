@@ -54,13 +54,14 @@ class PolicyInput:
     reason_codes: tuple[ReasonCode, ...] = ()
     hard_rule_action: Action | None = None  # e.g. sanctions hit
     amount: float | None = None  # for the segment rule; None means the rule cannot apply
+    kill_switch: bool = False  # the tenant's kill switch is engaged: every case goes to a person (PRD 12.4)
 
 
 @dataclass(frozen=True)
 class PolicyResult:
     action: Action
     risk_band: RiskBand
-    gate: str  # which step decided: hard_rule | data_quality | novelty | matrix
+    gate: str  # which step decided: kill_switch | hard_rule | data_quality | novelty | matrix
     queue: str | None
     policy_version: str
     automation_level: int
@@ -105,6 +106,8 @@ def evaluate(inp: PolicyInput, cfg: PolicyConfig | None = None) -> PolicyResult:
     def res(action: Action, gate: str, queue: str | None = None) -> PolicyResult:
         return PolicyResult(action, band, gate, queue, cfg.version, cfg.automation_level)
 
+    if inp.kill_switch:  # first of all: nothing the model or a rule says matters while the model is not to be relied on
+        return res(Action.REQUEST_HUMAN_REVIEW, "kill_switch")
     if inp.hard_rule_action is not None:
         return res(inp.hard_rule_action, "hard_rule")
     if ReasonCode.DATA_QUALITY_FLOOR in inp.reason_codes:
