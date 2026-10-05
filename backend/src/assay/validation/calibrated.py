@@ -71,10 +71,13 @@ def _slice_metrics(mask: np.ndarray, wrong, err_cal, err_prov, cal_ti, prov_ti, 
 
 def evaluate_calibrated(cases: ValidationCases, calibrated_cfg: CalibratedConfig | None = None,
                         vcfg: CalibratedValidationConfig | None = None,
-                        slice_at: float | None = None) -> tuple[CalibratedTrustModel, dict]:
+                        slice_at: float | None = None, fit_model=None) -> tuple[CalibratedTrustModel, dict]:
     """Fit, calibrate and evaluate on consecutive windows, run the gate, and return (model, report).
     The model's `gate` is set from the result, so `model.enabled` is true only if the gate passed.
     Raises CalibratedFitError if there is too little matured evidence to fit at all.
+
+    `fit_model(fit_cases, fit_correct, cal_cases, cal_correct)` replaces the meta-model with another that has the same
+    interface (for example the recalibration-only map, trust/recalibrated.py). The windows and the gate are the same.
 
     `slice_at` (an event time, epoch seconds) additionally reports the evaluation window in two parts,
     before and after it: for example before and after a new fraud type appears."""
@@ -82,8 +85,8 @@ def evaluate_calibrated(cases: ValidationCases, calibrated_cfg: CalibratedConfig
     fit_i, cal_i, ev_i = temporal_split(cases.times, v.fit_frac, v.cal_frac)
     correct = ~cases.wrong
     A = cases.assessments
-    model = CalibratedTrustModel.fit([A[i] for i in fit_i], correct[fit_i].astype(int),
-                                     [A[i] for i in cal_i], correct[cal_i].astype(int), cfg)
+    fit_args = ([A[i] for i in fit_i], correct[fit_i].astype(int), [A[i] for i in cal_i], correct[cal_i].astype(int))
+    model = fit_model(*fit_args) if fit_model else CalibratedTrustModel.fit(*fit_args, cfg)
 
     ev = [A[i] for i in ev_i]
     wrong = cases.wrong[ev_i]
@@ -126,7 +129,8 @@ def evaluate_calibrated(cases: ValidationCases, calibrated_cfg: CalibratedConfig
     report = {
         "meta": {"mode": "calibrated", "n_fit": model.n_fit, "n_calibration": model.n_calibration,
                  "n_evaluation": len(ev_i), "wrong_in_evaluation": int(wrong.sum()),
-                 "high_error_tolerance": cfg.high_error, "low_error_tolerance": cfg.low_error},
+                 "high_error_tolerance": model.cfg.high_error, "low_error_tolerance": model.cfg.low_error,
+                 "variant": model.cfg.version},
         "auroc": {"calibrated": M.auroc(wrong, err_cal), "provisional": M.auroc(wrong, err_prov),
                   **{k: M.auroc(wrong, sc) for k, sc in baselines.items()}},
         "calibrated_minus_baseline": vs,

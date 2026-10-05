@@ -26,6 +26,7 @@ from assay.detection.bundle import BundleManifest
 from assay.features import FEATURE_SET_VERSION, compute_features, definition_versions, feature_names
 from assay.features.compute import parse_time
 from assay.ingestion.repo import DuplicateError
+from assay.learning.lifecycle import LifecycleStore, Routing, in_canary
 from assay.policy import Action, PolicyInput, PolicyService, evaluate
 from assay.trust import Component, TrustConfig
 from assay.trust.assessor import CaseAssessment, TrustAssessor
@@ -58,6 +59,9 @@ class BundleRegistry:
     def __init__(self, trust_cfg: TrustConfig | None = None, explain_cfg: ExplainConfig | None = None):
         self._bundles: dict[tuple[str, str], LoadedBundle] = {}
         self._champion: dict[str, str] = {}
+        self._routing: dict[str, Routing] = {}  # what the stored lifecycle events say (learning/lifecycle.py)
+        # Loads a bundle this process has not seen (a candidate another worker created). Set by the server.
+        self.loader: Callable[[str, str], LoadedBundle | None] | None = None
         self.trust_cfg = trust_cfg or TrustConfig()
         self.explain_cfg = explain_cfg or ExplainConfig()
 
@@ -93,10 +97,34 @@ class BundleRegistry:
         return self._bundles[(tenant_id, bid)]
 
     def get(self, tenant_id: str, bundle_id: str) -> LoadedBundle:
-        try:
-            return self._bundles[(tenant_id, bundle_id)]
-        except KeyError:
-            raise ScoringError(f"bundle {bundle_id} not loaded for tenant") from None
+        lb = self._bundles.get((tenant_id, bundle_id))
+        if lb is None and self.loader is not None:
+            lb = self.loader(tenant_id, bundle_id)
+        if lb is None:
+            raise ScoringError(f"bundle {bundle_id} not loaded for tenant")
+        return lb
+
+    def set_routing(self, tenant_id: str, routing: Routing) -> None:
+        self._routing[tenant_id] = routing
+
+    def deciding_id(self, tenant_id: str) -> str | None:
+        """The bundle id that decides when no canary applies: a promoted candidate, else the loaded champion."""
+        r = self._routing.get(tenant_id)
+        return (r.champion if r and r.champion else None) or self._champion.get(tenant_id)
+
+    def route(self, tenant_id: str, txn_id: str) -> LoadedBundle:
+        """The bundle that decides this transaction: the canary for its share of traffic, else the champion."""
+        r = self._routing.get(tenant_id)
+        if r and r.canary and in_canary(txn_id, r.canary_salt, r.canary_share):
+            return self.get(tenant_id, r.canary)
+        bid = self.deciding_id(tenant_id)
+        if bid is None:
+            raise ScoringError("no champion bundle for tenant")
+        return self.get(tenant_id, bid)
+
+    def shadow(self, tenant_id: str) -> LoadedBundle | None:
+        r = self._routing.get(tenant_id)
+        return self.get(tenant_id, r.shadow) if r and r.shadow else None
 
 
 @dataclass
@@ -139,7 +167,7 @@ class ScoringService:
     def current_drift(self, tenant_id: str, lb: LoadedBundle | None = None) -> np.ndarray:
         """Per-feature drift in force: the latest stored drift run for this bundle (so every worker
         and every restart agree), else an in-process value, else zeros (no drift information)."""
-        lb = lb or self.registry.champion(tenant_id)
+        lb = lb or self.deciding_bundle(tenant_id)
         runs = self.repo.find(tenant_id, "drift_runs", newest_first=True, limit=1)
         if runs and runs[0]["bundle_id"] == lb.manifest.bundle_id and len(runs[0]["drift"]) == lb.n_features:
             return np.array(runs[0]["drift"], dtype=float)
@@ -172,11 +200,40 @@ class ScoringService:
                 return self._view(tenant_id, existing[0])
             raise
 
+    def sync_routing(self, tenant_id: str) -> None:
+        """Point the registry at what the stored lifecycle events say, so every worker agrees."""
+        self.registry.set_routing(tenant_id, LifecycleStore(self.repo).routing(tenant_id))
+
+    def deciding_bundle(self, tenant_id: str) -> LoadedBundle:
+        self.sync_routing(tenant_id)
+        bid = self.registry.deciding_id(tenant_id)
+        if bid is None:
+            raise ScoringError("no champion bundle for tenant")
+        return self.registry.get(tenant_id, bid)
+
+    def _shadow_score(self, tenant_id: str, txn: dict, x, pred, lb: LoadedBundle, actor: str) -> None:
+        """A candidate in shadow scores the same features and takes no action (PRD 12.2). Its output is stored for
+        the shadow gate and used by nothing else. A candidate cannot shadow itself when it is the canary."""
+        sb = self.registry.shadow(tenant_id)
+        if sb is None or sb.manifest.bundle_id == lb.manifest.bundle_id:
+            return
+        sp = sb.model.predict(x, sb.manifest.thresholds["t_high"])
+        try:
+            self.repo.insert(tenant_id, "shadow_scores", {
+                "schema_version": SCHEMA, "txn_id": txn["txn_id"], "candidate_id": sb.manifest.bundle_id,
+                "champion_id": lb.manifest.bundle_id, "candidate_risk": _f(sp.calibrated[0]),
+                "champion_risk": _f(pred.calibrated[0]),
+                "candidate_call": bool(sp.calibrated[0] >= sb.manifest.thresholds["t_high"]),
+                "champion_call": bool(pred.calibrated[0] >= lb.manifest.thresholds["t_high"])}, actor)
+        except DuplicateError:
+            pass
+
     def _ensure_bundle_row(self, tenant_id: str, lb: LoadedBundle, actor: str) -> None:
         ensure_bundle_row(self.repo, tenant_id, lb.manifest, actor)
 
     def _score(self, tenant_id: str, txn: dict, actor: str) -> dict:
-        lb = self.registry.champion(tenant_id)
+        self.sync_routing(tenant_id)
+        lb = self.registry.route(tenant_id, txn["txn_id"])
         now = self.cfg.clock()
         self._ensure_bundle_row(tenant_id, lb, actor)
         history = self.repo.history_for_features(tenant_id, txn)
@@ -197,6 +254,7 @@ class ScoringService:
             "bundle_id": lb.manifest.bundle_id, "raw_score": _f(pred.raw[0]),
             "calibrated_risk": _f(pred.calibrated[0]), "member_spread": _f(pred.member_spread[0]),
             "distance_to_threshold": _f(pred.distance_to_threshold[0])}, actor)
+        self._shadow_score(tenant_id, txn, x, pred, lb, actor)
 
         explain = self.should_explain(txn["txn_id"], _f(pred.calibrated[0]), t_low)
         drift = self.current_drift(tenant_id, lb)
@@ -342,7 +400,8 @@ class ScoringService:
 
     def model_bundles(self, tenant_id: str) -> list[dict]:
         """Recorded bundles with their champion flag. The artefact itself is never exposed."""
-        champion = self.registry._champion.get(tenant_id)
+        self.sync_routing(tenant_id)
+        champion = self.registry.deciding_id(tenant_id)
         rows = self.repo.find(tenant_id, "model_bundles", newest_first=True)
         return [{**{k: r[k] for k in ("bundle_id", "dataset_id", "code_commit", "status", "artifact_sha256")},
                  "champion": r["bundle_id"] == champion, "thresholds": r["manifest"].get("thresholds"),

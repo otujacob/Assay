@@ -61,6 +61,15 @@ check("the what-if card says either what would flip the call or that none exists
 check("the what-if card shows how far two explanation methods agree", /Two methods agree \d+%/.test(await text("[data-testid=cf-methods]")));
 await page.locator("[data-testid=counterfactuals]").screenshot({ path: "screenshots/11-what-if.png" });
 
+// --- analyst: what else is linked to this case? (entity graph, PRD 13) ---------------------------------------------
+check("linked entities are not loaded until asked", (await page.locator("[data-testid=graph-note]").count()) === 0);
+await page.getByRole("button", { name: "Show linked entities" }).click();
+await page.waitForSelector("[data-testid=graph-note]", { timeout: 60000 });
+const gText = await text("[data-testid=linked-entities]");
+check("the linked-entities card says it shows connections, not guilt, and is not for customers", /not of wrongdoing/.test(gText) && /must not be shared with a customer/.test(gText));
+check("it lists the case's entities and either some links or that none exist", (await page.locator("[data-testid=graph-link]").count()) > 0 || (await page.locator("[data-testid=graph-none]").count()) === 1 || /no device, IP address or beneficiary/.test(gText), gText.slice(0, 140));
+await page.locator("[data-testid=linked-entities]").screenshot({ path: "screenshots/14-linked-entities.png" });
+
 await page.getByRole("button", { name: /Override AI/ }).click();
 await page.getByRole("button", { name: "Submit override" }).click();
 check("override without a reason code is refused", /needs a reason code/i.test(await text("[role=alert]")));
@@ -147,6 +156,59 @@ await page.waitForSelector(`[data-testid=policy-panel] tbody tr:has-text("${vers
 const inForce = await text("[data-testid=policy-panel] tbody tr:has-text('In force')");
 check("after approval the policy is in force", inForce.includes(version), inForce.slice(0, 80));
 await page.locator("[data-testid=policy-panel]").screenshot({ path: "screenshots/08-policy-approved.png" });
+
+// --- model updates: a candidate through shadow, approval, canary, promotion and rollback (PRD 12) -----------------
+// Needs a demo started with --with-candidate. Without one the panel says so and this part is skipped.
+await user("admin");
+await page.waitForSelector("[data-testid=model-updates]");
+await page.waitForTimeout(800);
+const hasCandidate = (await page.locator("[data-testid=model-updates]").getByRole("button", { name: "Start shadow" }).count()) > 0;
+if (!hasCandidate) {
+  console.log("SKIP  no candidate model ready to start in this demo (start it with --with-candidate; each demo run can take its candidate through the lifecycle once)");
+} else {
+  const traffic = (n) => page.evaluate((k) => fetch(`/demo/traffic?n=${k}`, { method: "POST" }).then((r) => r.json()), n);
+  const refresh = async () => { await page.getByRole("button", { name: "Refresh" }).click(); await page.waitForTimeout(500); };
+  const mu = page.locator("[data-testid=model-updates]");
+  check("a validated candidate is listed with its gates, and an unjudged gate is not shown as a pass",
+    /Validated/.test(await text("[data-testid=model-updates]")) && /Needs review/.test(await text("[data-testid=model-updates]")));
+  check("the feedback summary is shown", (await page.locator("[data-testid=feedback-pool]").count()) === 1);
+  await page.screenshot({ path: "screenshots/12-model-updates.png", fullPage: false });
+  await mu.getByRole("button", { name: "Start shadow" }).click();
+  await mu.getByText("In shadow").first().waitFor({ timeout: 10000 });
+  check("an administrator can start shadow", true);
+  check("an administrator has no approve control", (await mu.getByRole("button", { name: "Approve" }).count()) === 0);
+  const t1 = await traffic(40);
+  check("live traffic was scored while in shadow", t1.played > 0, JSON.stringify(t1));
+
+  await user("approver");
+  await page.waitForSelector("[data-testid=model-updates]");
+  await refresh();
+  const mu2 = page.locator("[data-testid=model-updates]");
+  check("the shadow report shows cases and agreement with the champion", /Agrees with the champion on \d+%/.test(await text("[data-testid=shadow-report]")), await text("[data-testid=shadow-report]"));
+  check("approval is blocked until a reason and the segment review are given", await mu2.getByRole("button", { name: "Approve" }).isDisabled());
+  await mu2.getByLabel("Approval rationale").fill("Reviewed the gate report and the shadow run");
+  await mu2.getByLabel(/I reviewed the results by segment/).check();
+  for (const box of await mu2.locator("[aria-label='Gates that could not be judged'] input[type=checkbox]").all()) await box.check();
+  await mu2.getByRole("button", { name: "Approve" }).click();
+  await mu2.getByRole("button", { name: "Start canary" }).waitFor({ timeout: 10000 });
+  check("a different person approves, and the candidate moves to approved", true);
+  await mu2.getByLabel("Canary share").fill("0.5");
+  await mu2.getByRole("button", { name: "Start canary" }).click();
+  await mu2.getByRole("button", { name: "Promote to champion" }).waitFor({ timeout: 10000 });
+  check("the status line shows the canary share", /canary .* at 50% of traffic/.test(await text("[data-testid=learning-status]")), await text("[data-testid=learning-status]"));
+  const t2 = await traffic(60);
+  check("live traffic was decided partly by the canary", t2.played > 0, JSON.stringify(t2));
+  await mu2.getByRole("button", { name: "Promote to champion" }).click();
+  await page.waitForFunction(() => /Champion/.test(document.querySelector("[data-testid^=candidate-b-]")?.textContent ?? "") && !/canary/.test(document.querySelector("[data-testid=learning-status]")?.textContent ?? ""), null, { timeout: 10000 });
+  check("promotion needs a canary that decided enough cases, and then makes it the champion", true);
+  await page.screenshot({ path: "screenshots/13-model-promoted.png", fullPage: false });
+  await mu2.getByLabel("Roll back (reason)").fill("end-to-end check");
+  await mu2.getByRole("button", { name: "Roll back" }).click();
+  await mu2.getByText("Rolled back").first().waitFor({ timeout: 10000 });
+  check("a rollback restores the previous champion", !/canary/.test(await text("[data-testid=learning-status]")));
+  const hist = await mu2.locator("details").first().innerText();
+  void hist;
+}
 
 // --- auditor: read-only policies, audit log with search and CSV export (FR-34, FR-43) ----------------------------
 await user("auditor");

@@ -132,10 +132,38 @@ How to read it:
 - A guess, not a finding: the meta-model learns its weights from only tens of wrong recommendations, so
   its estimation noise may cost a little ranking. More matured outcomes should shrink it.
 
-What would change the verdict is more matured outcomes (a pilot), not a looser rule. One untested
-alternative is a recalibration-only variant, a monotone mapping of the provisional score. It ranks
-identically by construction, so it could not lose on P2, and it would give the calibration. It would
-need its own pre-set test on fresh seeds. Synthetic data only, as always (PRD 28.3).
+What would change the verdict is more matured outcomes (a pilot), not a looser rule. Synthetic data only, as always (PRD 28.3).
+
+### The recalibration-only variant (twelve fresh seeds, 501 to 512)
+
+The untested alternative named above has now been tested. It keeps the provisional index's order and learns only a
+monotone map from it to P(correct) (`backend/src/assay/trust/recalibrated.py`). The rule (same P1, P2, P3 as above) was
+written before the runs in the docstring of `validate_calibrated_many_seeds.py`, and the seeds are fresh. The map is fitted
+on the oldest 65% of each seed's window and everything is evaluated on the newest 35%, as before. Evidence:
+[recalibrated-501-512/](recalibrated-501-512/).
+
+| Question | Result | Rule | Verdict |
+|---|---|---|---|
+| P1 Calibration, stable part | ECE **0.0046** against 0.275 for the provisional score read as a probability; improvement +0.271 (interval +0.265 to +0.276) | mean ECE at most 0.03 and better than provisional | **supported** |
+| P2 Ranking errors, stable part | recalibrated minus provisional **+0.0001** AUROC (interval -0.0001 to +0.0002) | lower bound above -0.02 | non-inferior (identical, as designed) |
+| P3 Ranking errors after novel fraud appears | **-0.0000** (interval -0.0001 to +0.0000) | lower bound above -0.02 | non-inferior (identical) |
+
+**By the rule written in advance, the verdict is: worth enabling for a pilot.** The calibration holds after the novel fraud type
+appears too (ECE 0.0036), the High band's observed error was 0.37% against the 1% it was set from, and the interval is narrow
+(0.49 points on the 0 to 100 scale on average).
+
+What that verdict does **not** say:
+- **It does not pass the system's own gate on most seeds.** The PRD 6.6 gate, which the server enforces, passes in only
+  **2 of 12** seeds. The reason is the ranking comparison with B3 (the model's own maximum class probability), which the rule
+  above did not use: on the stable part the provisional index ranks wrong recommendations **slightly worse** than B3 on these
+  seeds (-0.019 AUROC, interval -0.027 to -0.011; ahead in 1 of 12), and **better** after the novel fraud type appears (+0.021, interval
+  +0.005 to +0.038, ahead in 9 of 12). On the earlier twelve seeds (301 to 312) the meta-model was level with B3 on the stable part (+0.002). Both sets of seeds
+  are synthetic and the stable part holds few errors, so the difference between them may be noise, and it is not tested here; but it is a reason not to
+  claim the Trust Index beats the simplest baseline everywhere.
+- **Calibrated mode stays off by default.** A server refuses to run a tenant in calibrated mode unless that tenant's bundle passed
+  the gate on that tenant's own matured outcomes. This variant removes the calibration risk (the ranking is the provisional index's,
+  so it cannot be worse than it) and leaves the ranking question for a pilot to answer.
+- Build a bundle with it: `python scripts/build_calibrated_bundle.py --seed N --out DIR --method recalibrated`.
 
 ## Counterfactuals: how the engine behaves (a description, not a hypothesis test)
 
@@ -168,6 +196,58 @@ Limits to keep in mind:
   case but has not been summarised across cases here. Some disagreement is expected by design, because
   the permutation view includes the random forest and isolation forest that SHAP here does not.
 
+## Entity graph: does it add detection value over a join on the same data? (twelve seeds, 601 to 612)
+
+The question (PRD H6): do temporal, confidence-weighted relationships add detection value over the same entity data used as
+flat features? Script: `backend/scripts/validate_graph_many_seeds.py`; per-seed results and the summary are in
+[graph-601-612/](graph-601-612/). The decision rule was written in the script before the seeds were run.
+
+**These rings are simulated.** The standard dataset gets an optional scenario (`GeneratorConfig(graph_scenario=True)`, off by
+default, and the default datasets are byte-for-byte unchanged, which a test pins): five rings of 5 to 8 customers who commit fraud
+together through shared devices, IP addresses and beneficiaries, each transaction looking ordinary on its own, in four campaigns
+spread over the timeline; 60 families who share a device legitimately; and three public IP addresses used by hundreds of
+unrelated customers. The rings are the experiment's own construction. It tests that the graph can find structure that is there and
+how it compares with a join; it is not evidence that real fraud has this shape (PRD 13.6).
+
+Three arms, trained identically and scored on the same verified-outcome-only test window: **F0** the registry's flat features;
+**F1** F0 plus the same entity data as flat features (30-day counts of distinct other customers per device, IP and beneficiary, and
+how many of them have a confirmed fraud known at the time); **G** F0 plus graph features (confidence-weighted, decayed,
+specificity-discounted, two hops, connected groups). Metric: PR-AUC on calibrated probabilities, "ring cases" being legitimate rows
+plus only the ring frauds and "other fraud" legitimate rows plus only the other fraud types. About 186 frauds per test window, 60 of
+them ring frauds.
+
+| PR-AUC | F0 | F1 (flat entity data) | G (graph) | G minus F1 (95% interval) | ahead |
+|---|---|---|---|---|---|
+| All cases | 0.726 | 0.781 | **0.798** | **+0.018 (+0.006, +0.030)** | 10 of 12 |
+| Ring cases | 0.689 | 0.893 | **0.963** | **+0.071 (+0.047, +0.094)** | 12 of 12 |
+| Other fraud | 0.688 | 0.683 | 0.675 | -0.008 (-0.017, +0.001) | 4 of 12 |
+
+**Verdict under the pre-set rule: NOT supported as specified.** R1 (better overall) and R2 (better on ring cases) held. **R3
+failed**: on the other fraud types the graph is slightly worse than the flat baseline, and the lower end of the interval (-0.017)
+is below the -0.01 limit. So, as the PRD says for this case (H6), **the graph stays investigator context only** and is not a model
+input. It is built that way.
+
+What this says, in plain terms:
+- **Where the structure exists, the graph finds it, and finds it better than a join.** A plain join already helps a lot (ring
+  cases 0.689 to 0.893), which is the main thing the entity data buys. The graph adds a further 0.07 on ring cases. Its features combine confidence weighting, recency, spreading known
+  fraud over two hops, community size and density, and discounting busy nodes; this experiment did not separate which of them
+  produces the gain.
+- **Extra columns cost a little elsewhere.** Adding either set of features lowered PR-AUC on the non-ring fraud (flat -0.006, graph
+  -0.014 against F0): more columns, and nothing in the other fraud types for them to find. A model that takes graph features would
+  need them only where they help, which this experiment did not test.
+- **False links were rare, and this is the easy case.** Of the derived links held at the end of the test window, 2.2% on average joined
+  customers outside any planted ring or family (all of them through beneficiaries; no device link was false). The three public IP
+  addresses never linked anyone, because the graph does not expand a node with more than 60 customers. A real tenant's shared
+  infrastructure is messier than three clean hubs.
+- **Cost.** Building the graph and flat features for a seed's roughly 27,000 transactions took about 44 seconds on one core
+  (about 1.6 ms per transaction).
+  No pilot-volume latency test has been run (OPD-14).
+
+Not checked: whether graph features help detection of other patterns the PRD names (mule accounts, synthetic identities, which
+need attributes this dataset does not have); stability of the communities (they are connected groups above a confidence
+threshold, not Louvain or Leiden, and can merge two rings joined by one strong link); the PRD's false-relationship rate from
+analyst flags (no real flags exist).
+
 ## Component ablations (PRD 6.4), the first two seeds
 
 | Component | Seed 5 | Seed 99 | Reading |
@@ -184,8 +264,59 @@ product owner (OPD-3), and should be made on a window separate from the one used
 ## Stress tests (PRD 6.5)
 
 Drift injection, degraded data and held-out fraud type all pass on both seeds. The noisy-analyst-label
-test is **not testable** until the feedback quality engine (E6) exists. It is reported as such, not
-skipped silently.
+test needs the learning side of the feedback engine, which now exists: see "Feedback acceptance" below.
+
+## Feedback acceptance: does scoring feedback before learning help? (twelve seeds, 401 to 412)
+
+The question (PRD H4): is a model trained on feedback that passed a quality check better than one trained on
+every analyst decision, judged on verified outcomes that analysts never touched? Script:
+`backend/scripts/validate_feedback_many_seeds.py`; per-seed results and the summary are in
+[feedback-401-412/](feedback-401-412/). The decision rule was written in the script before the seeds were run.
+
+**These analysts are simulated** (`assay/validation/analysts.py`): four good (92% right), one weak (62%), one
+adversarial (25%) and one who approves everything in seconds, plus a senior who rules on half of the conflicts.
+The simulation tests that the pipeline does what it is specified to do when fed labels of known quality. It is
+not evidence about real analysts (PRD 19, OPD-20), and the results below depend on the assumptions in that file.
+Stated confidence and checklists were made uninformative about correctness, so the engine had to rely on track
+record, corroboration and integrity checks.
+
+Setup: 92% of the training-window verified outcomes were hidden, as if never confirmed, and the analysts decided
+those cases instead (about 10,200 cases per seed). Calibration and test windows were untouched.
+
+| Share of cases handled by weak, adversarial or lazy analysts | 0% | 30% | 60% |
+|---|---|---|---|
+| Wrong labels among ALL analyst decisions | 7.2% | 14.9% | 22.2% |
+| Wrong labels among ACCEPTED labels | 1.0% | 1.7% | 2.5% |
+| Share of cases accepted | 18% | 18% | 17% |
+| PR-AUC, verified outcomes only (V) | 0.579 | 0.579 | 0.579 |
+| PR-AUC, trained on all feedback (ALL) | 0.691 | 0.675 | 0.634 |
+| PR-AUC, trained on accepted feedback (ACC) | 0.673 | 0.676 | 0.665 |
+| PR-AUC, with the hidden labels true (ceiling) | 0.705 | 0.705 | 0.705 |
+| ACC minus ALL (95% interval) | -0.018 (-0.038, +0.001) | +0.001 (-0.013, +0.015) | +0.031 (+0.010, +0.052) |
+| ACC minus V (95% interval) | +0.094 (+0.055, +0.133) | +0.097 (+0.057, +0.136) | +0.085 (+0.059, +0.112) |
+
+**Verdict under the pre-set rule: NOT supported as specified.** R2 (more robust than learning from everything
+when noise is heavy), R3 (does not hurt compared with ignoring feedback) and R4 (accepted labels have at most half
+the error of all labels) held. **R1 failed**: when analysts are clean, the accepted-feedback model is not shown to be at
+least as good as the all-feedback model (ACC minus ALL -0.018, interval -0.038 to +0.001, lower end below the
+-0.01 limit; ahead in only 4 of 12 seeds).
+
+What this says, in plain terms:
+- The check does what it is for. It removed 97% of the wrong labels at every noise level (the lazy and adversarial
+  analysts were flagged in all 12 seeds), and the model built on what it kept beats the all-feedback model once
+  noise is heavy.
+- It is conservative. With the default thresholds it accepts about 18% of cases. Of the accepted unverified labels, 88% were
+  ones a second analyst agreed on, 10% were adjudicated and 2% were single decisions (a lone decision cannot reach the accept
+  threshold unless the analyst has a proven record and high confidence). When feedback is clean, throwing away
+  four labels in five costs more than the noise it avoids. At 30% noise the two are level.
+- Any feedback beats none: both feedback models beat the verified-only model by 0.05 to 0.11 PR-AUC, because
+  verified labels were scarce by design. Where verified labels are plentiful, this gain would be much smaller
+  (a smoke run with half the labels hidden showed none).
+- Accept thresholds and the share needing corroboration are open product decisions (OPD-11). They were not tuned
+  here, because tuning them on these seeds would invalidate the test. A pilot is where they get set.
+
+Not checked: concentration of labels on particular merchants or beneficiaries (needs the graph store); sudden
+shifts in an analyst's accuracy; whether real analysts' confidence says anything about being right.
 
 ## Method changes made after seeing results
 

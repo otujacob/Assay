@@ -1,6 +1,7 @@
 """Fit a calibrated Trust Index for a model bundle, run the section 6 gate, and save the bundle.
 
     python scripts/build_calibrated_bundle.py --seed 300 --out ../scratch/cal-bundle
+    python scripts/build_calibrated_bundle.py --seed 300 --out ../scratch/recal-bundle --method recalibrated
 
 This builds a SYNTHETIC bundle from a generated dataset, to show the workflow. For a real tenant the
 same steps run on that tenant's own matured verified outcomes (PRD 5.6), and never on another tenant's.
@@ -8,7 +9,8 @@ same steps run on that tenant's own matured verified outcomes (PRD 5.6), and nev
 What it does:
   1. trains the detection model and the Provisional Trust Index components,
   2. assesses the later cases that have matured outcomes (explanation testing on a sample, as under OPD-7),
-  3. fits the meta-model on the oldest part, calibrates it on the next, and evaluates on the newest,
+  3. fits the meta-model on the oldest part, calibrates it on the next, and evaluates on the newest (with
+     --method recalibrated: fits only a monotone map from the provisional index to a probability on the oldest 65%),
   4. applies the PRD 6.6 gate and records the result INSIDE the meta-model,
   5. saves the signed bundle with the meta-model attached, and writes the validation report.
 
@@ -35,6 +37,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, required=True, help="synthetic dataset seed")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--method", choices=("meta", "recalibrated"), default="meta",
+                    help="meta: the logistic meta-model (trust/calibrated.py). recalibrated: keep the provisional order and "
+                         "only map it to a probability (trust/recalibrated.py)")
     ap.add_argument("--ece-tolerance", type=float, default=0.03, help="calibration error tolerance (PRD 6.6)")
     ap.add_argument("--signing-key", default=os.environ.get("ASSAY_BUNDLE_SIGNING_KEY", "dev-signing-key"))
     a = ap.parse_args()
@@ -48,9 +53,18 @@ def main() -> int:
     ds, txns, cfg, novel_start = make_long_dataset(a.seed)
     r = train_bundle(txns, ds.outcomes, cfg)
     cases = collect_cases(r, {t["txn_id"]: t for t in txns}, 10**6, explain_frac=0.25)
+    fit_model = None
+    if a.method == "recalibrated":
+        import numpy as np
+
+        from assay.trust.recalibrated import RecalibratedConfig, RecalibratedTrustModel
+
+        def fit_model(fc, fy, cc, cy):  # one map, fitted on both earlier windows together
+            return RecalibratedTrustModel.fit(fc + cc, np.concatenate([fy, cy]), RecalibratedConfig())
     try:
         model, report = evaluate_calibrated(
-            cases, vcfg=CalibratedValidationConfig(ece_tolerance=a.ece_tolerance), slice_at=novel_start.timestamp())
+            cases, vcfg=CalibratedValidationConfig(ece_tolerance=a.ece_tolerance), slice_at=novel_start.timestamp(),
+            fit_model=fit_model)
     except CalibratedFitError as e:
         print(f"NOT FITTED: {e}\nStaying in Provisional mode; the bundle is not written.")
         return 2

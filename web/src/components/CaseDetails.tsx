@@ -4,6 +4,7 @@ import { RECOMMENDATION_LABEL, formatTime, money, num, pct } from "../lib/format
 import { ActionPanel } from "./ActionPanel";
 import { ComponentBars } from "./ComponentBars";
 import { CounterfactualCard } from "./CounterfactualCard";
+import { LinkedEntities } from "./LinkedEntities";
 import { Pill, PriorityPill, RiskPill } from "./Pill";
 import { ShapDrivers } from "./ShapDrivers";
 import { TrustGauge } from "./TrustGauge";
@@ -68,6 +69,7 @@ export function CaseDetails({
           <ComponentBars trust={d.trust} />
           <ShapDrivers explanation={view.explanation} pending={d.explanation_status === "pending"} />
           <CounterfactualCard key={view.decision_id} decisionId={view.decision_id} />
+          <LinkedEntities key={`g-${view.decision_id}`} decisionId={view.decision_id} canFlag={canAct || canAdjudicate} />
           <div className="card recommended" data-testid="recommendation">
             <div className="rec-title">Recommended Action</div>
             <div className="rec-action">{RECOMMENDATION_LABEL[d.recommendation] ?? d.recommendation}</div>

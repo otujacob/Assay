@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -31,6 +32,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 from assay.api import Credential, Credentials, create_app, sign
 from assay.detection import train_bundle
 from assay.ingestion import IngestionConfig, IngestionService, InMemoryRepository
+from assay.learning.lifecycle import LifecycleConfig
+from assay.learning.service import LearningConfig
 from assay.review.service import REVIEW_ACTIONS, ReviewConfig, ReviewError, ReviewService
 from assay.scoring import BundleRegistry, ScoringConfig, ScoringService
 from assay.synthetic import to_wire
@@ -38,6 +41,7 @@ from assay.validation.report import store_report
 from conftest_detection import make_dataset
 
 TENANT = "tenant-synth"
+HELD_BACK = 120
 DEMO_USERS = {
     "analyst": {"roles": {"analyst"}, "label": "Analyst"},
     "analyst2": {"roles": {"analyst"}, "label": "Analyst (2nd)"},
@@ -51,7 +55,7 @@ DEMO_USERS = {
 SECRETS = {k: f"demo-{k}-secret".encode() for k in DEMO_USERS}
 
 
-def build_world(hours: int = 36, log=print):
+def build_world(hours: int = 72, log=print):
     log("generating synthetic data and training the bundle (about 15 s)...")
     ds, txns, cfg = make_dataset()
     r = train_bundle(txns, ds.outcomes, cfg)
@@ -75,6 +79,8 @@ def build_world(hours: int = 36, log=print):
 
     stream = sorted((t for t in txns if ingest_from <= datetime.fromisoformat(t["event_time"]) <= last),
                     key=lambda t: t["event_time"])
+    reserve = [t for t in stream[-HELD_BACK:]]  # played later, on request, as live traffic (dev only)
+    stream = stream[:-HELD_BACK]
     log(f"replaying {len(stream)} transactions ({hours}h scored) through the real services...")
     scored = 0
     for t in stream:
@@ -113,13 +119,27 @@ def build_world(hours: int = 36, log=print):
         if (p / "report.json").exists():
             stress = json.loads((p / "stress.json").read_text()) if (p / "stress.json").exists() else None
             store_report(repo, TENANT, r.manifest, json.loads((p / "report.json").read_text()), stress)
-    return repo, scoring, review, ing, r, clock
+    return repo, scoring, review, ing, r, clock, (ds, txns, cfg, reserve, shift)
 
 
-def build_app(log=print) -> FastAPI:
-    _repo, scoring, review, ing, _r, _clock = build_world(log=log)
+def build_app(log=print, with_candidate: bool = False) -> FastAPI:
+    repo, scoring, review, ing, _r, clock, (ds, txns, cfg, reserve, shift) = build_world(log=log)
     creds = Credentials([Credential(k, TENANT, SECRETS[k], frozenset(v["roles"])) for k, v in DEMO_USERS.items()])
-    inner = create_app(ing, creds, scoring=scoring, review=review)
+    # DEMO ONLY: a real shadow runs for days and a real canary decides hundreds of cases. These limits are low so
+    # the whole path can be shown in minutes. The defaults (7 days, 200 and 100 cases) are what production uses.
+    learning = LearningConfig(lifecycle=LifecycleConfig(min_shadow_days=0.0, min_shadow_cases=20, min_canary_cases=20,
+                                                        clock=lambda: clock["fn"]()),
+                              bundle_dir=Path(tempfile.mkdtemp(prefix="assay-demo-candidates-")), signing_key=b"demo-signing-key")
+    if with_candidate:
+        from assay.learning.service import LearningService
+
+        log("creating a candidate model (trains it and runs the validation gates; about 2 minutes)...")
+        with repo.atomic(TENANT):
+            out = LearningService(repo, scoring, learning).create_candidate(
+                TENANT, "u:demo-pipeline", txns=txns, outcomes=ds.outcomes, training=cfg)
+        log(f"candidate {out['candidate_id']} is {out['state']}")
+    inner = create_app(ing, creds, scoring=scoring, review=review, learning=learning)
+    queue = list(reserve)  # live traffic that has not been played yet
     transport = httpx.ASGITransport(app=inner)
 
     app = FastAPI(title="Assay DEMO (dev-only signing proxy)")
@@ -128,6 +148,20 @@ def build_app(log=print) -> FastAPI:
     def users():
         return [{"key": k, "label": v["label"], "roles": sorted(v["roles"])} for k, v in DEMO_USERS.items()
                 if k != "ingest"]
+
+    @app.post("/demo/traffic")
+    def traffic(n: int = 30):
+        """DEV ONLY: play the next `n` held-back transactions through the real services, as live traffic."""
+        done = 0
+        for _ in range(min(max(n, 0), len(queue))):
+            t = queue.pop(0)
+            w = to_wire(t)
+            ev = datetime.fromisoformat(w["event_time"]) + shift
+            w["event_time"] = ev.isoformat().replace("+00:00", "Z")
+            ing.ingest_transaction(TENANT, w)
+            scoring.score_transaction(TENANT, w["txn_id"])
+            done += 1
+        return {"played": done, "remaining": len(queue)}
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST"])
     async def proxy(path: str, request: Request):
@@ -154,9 +188,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--with-candidate", action="store_true",
+                    help="also train a candidate model, so the Model Updates panel has one to take through the lifecycle")
     a = ap.parse_args()
     print("DEMO server: synthetic data, dev-only signing proxy, NOT for production.")
-    uvicorn.run(build_app(), host=a.host, port=a.port, log_level="warning")
+    uvicorn.run(build_app(with_candidate=a.with_candidate), host=a.host, port=a.port, log_level="warning")
 
 
 if __name__ == "__main__":

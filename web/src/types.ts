@@ -310,3 +310,104 @@ export interface CounterfactualView {
   note: string;
   cross_method: { agreement: number; shap_drivers: string[]; permutation_drivers: string[] };
 }
+
+/** One validation gate for a candidate model (PRD 12.3). */
+export interface Gate {
+  id: string;
+  name: string;
+  status: "pass" | "fail" | "not_evaluated" | "review_required" | "pending";
+  detail: string;
+}
+
+export interface ShadowReport {
+  status: "pass" | "fail" | "pending";
+  detail: string;
+  n: number;
+  days?: number;
+  agreement?: number;
+  flag_rate_candidate?: number;
+  flag_rate_champion?: number;
+  mean_risk_shift?: number;
+  alarms: string[];
+}
+
+export interface LifecycleEvent {
+  kind: string;
+  actor: string;
+  at: string;
+  reason?: string;
+  rationale?: string;
+  share?: number;
+  waived_gates?: string[];
+}
+
+export type CandidateState = "validated" | "failed" | "shadow" | "approved" | "canary" | "champion" | "rolled_back" | "rejected";
+
+export interface Candidate {
+  candidate_id: string;
+  base_bundle_id: string;
+  created_by: string;
+  state: CandidateState;
+  pool: { accepted?: number; rejected?: number; deferred?: number; acceptance_rate?: number | null; feedback_used?: boolean };
+  training: { extra_labels_used?: number; feedback_used?: boolean; dataset_id?: string };
+  gates: { version: string; gates: Gate[]; failed: string[]; unresolved: string[] };
+  events: LifecycleEvent[];
+  shadow?: ShadowReport;
+}
+
+export interface LearningStatus {
+  champion: string | null;
+  shadow: string | null;
+  canary: { candidate: string; share: number } | null;
+  candidates: number;
+}
+
+export interface FeedbackPool {
+  cases: number;
+  accepted: number;
+  rejected: number;
+  deferred: number;
+  acceptance_rate: number | null;
+  accepted_by_level: Record<string, number>;
+  not_accepted_reasons: Record<string, number>;
+  flagged: Record<string, string[]>;
+  note: string;
+}
+
+/** What else is linked to a case through shared devices, IP addresses and beneficiaries (PRD 13). Investigator context. */
+export interface GraphLink {
+  other_customer: string;
+  relationship: string;
+  via_kind: string;
+  via: string;
+  confidence: number;
+  observations: number;
+  first_seen: string;
+  last_seen: string;
+  fraud_known: boolean;
+  flagged_wrong: boolean;
+}
+
+export interface GraphEntity {
+  relationship: string;
+  kind: string;
+  node: string;
+  other_customers: number;
+  degree: number;
+  hub: boolean;
+}
+
+export interface GraphView {
+  decision_id: string;
+  customer: string;
+  as_of: string;
+  graph_version: string;
+  entities: GraphEntity[];
+  links: GraphLink[];
+  links_total: number;
+  group: { size: number; links: number; fraud_linked_members: number };
+  features: Record<string, number>;
+  reliability: "ok" | "weak";
+  reliability_note: string | null;
+  note: string;
+}

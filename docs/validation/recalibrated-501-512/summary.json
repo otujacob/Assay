@@ -1,0 +1,165 @@
+{
+ "seeds": [
+  501,
+  502,
+  503,
+  504,
+  505,
+  506,
+  507,
+  508,
+  509,
+  510,
+  511,
+  512
+ ],
+ "n_seeds": 12,
+ "n_fitted": 12,
+ "refused": {},
+ "usable_seeds": {
+  "before": 12,
+  "after": 12
+ },
+ "stable_part": {
+  "ece_calibrated": {
+   "mean": 0.0045694550892327055,
+   "per_seed": [
+    0.0042,
+    0.0037,
+    0.004,
+    0.0058,
+    0.0041,
+    0.0045,
+    0.0042,
+    0.0064,
+    0.0061,
+    0.0036,
+    0.0042,
+    0.0041
+   ]
+  },
+  "ece_provisional_as_probability": {
+   "mean": 0.27513553022520254
+  },
+  "ece_improvement": {
+   "mean": 0.2705660751359698,
+   "t_ci": [
+    0.2652493166276528,
+    0.27588283364428684
+   ],
+   "boot_ci": [
+    0.26574489511096927,
+    0.27482342213231964
+   ]
+  },
+  "auroc_cal_minus_prov": {
+   "mean": 6.588386870078529e-05,
+   "t_ci": [
+    -7.912554859906914e-05,
+    0.0002108932860006397
+   ],
+   "per_seed": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0008,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "seeds_ahead": 1,
+   "n": 12
+  },
+  "auroc_cal_minus_B3": {
+   "mean": -0.019311309400132,
+   "t_ci": [
+    -0.027387742744622325,
+    -0.011234876055641673
+   ],
+   "per_seed": [
+    -0.0164,
+    -0.0064,
+    -0.029,
+    -0.0297,
+    -0.0392,
+    -0.0163,
+    -0.0325,
+    -0.014,
+    0.0069,
+    -0.0223,
+    -0.0101,
+    -0.0228
+   ],
+   "seeds_ahead": 1,
+   "n": 12
+  },
+  "auroc_calibrated": 0.8703940518067071,
+  "auroc_provisional": 0.8703281679380064,
+  "high_band_observed_error": 0.003683638628384632
+ },
+ "novel_part": {
+  "auroc_cal_minus_prov": {
+   "mean": -2.778418951382422e-05,
+   "t_ci": [
+    -8.893677831892505e-05,
+    3.336839929127661e-05
+   ],
+   "per_seed": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -0.0003,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "seeds_ahead": 0,
+   "n": 12
+  },
+  "auroc_cal_minus_B3": {
+   "mean": 0.02149740594659157,
+   "t_ci": [
+    0.004721554792324528,
+    0.03827325710085861
+   ],
+   "per_seed": [
+    0.0507,
+    0.0491,
+    0.0173,
+    0.0156,
+    0.0588,
+    0.0054,
+    -0.0205,
+    -0.0025,
+    0.0227,
+    0.0552,
+    0.0131,
+    -0.0068
+   ],
+   "seeds_ahead": 9,
+   "n": 12
+  },
+  "ece_calibrated_mean": 0.003632995719963807,
+  "ece_provisional_as_probability_mean": 0.2733523144493527
+ },
+ "gate_passed_seeds": 2,
+ "mean_interval_width": 0.48973504975509813,
+ "P1_calibration": "supported",
+ "P1_detail": {
+  "mean_ece_within_0.03": true,
+  "better_than_provisional_as_probability": true
+ },
+ "P2_discrimination_stable": "NON-INFERIOR",
+ "P3_discrimination_after_novelty": "NON-INFERIOR",
+ "verdict": "WORTH ENABLING FOR A PILOT"
+}

@@ -214,3 +214,6 @@ table.mini td { padding: 4px 6px; border-bottom: 1px solid #16223d; vertical-ali
   .kpis, .two-col, .shap-grid, .action-buttons, .form-grid { grid-template-columns: 1fr; }
   .comp-row { grid-template-columns: 120px 1fr 80px; }
 }
+
+.signin { max-width: 420px; margin: 12vh auto; padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; gap: 12px; }
+.signin h1 { margin: 0; font-size: 22px; }

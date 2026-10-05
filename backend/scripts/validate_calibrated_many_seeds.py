@@ -30,6 +30,16 @@ DECISION RULE (written before seeds 301-312 were run, so it cannot be chosen aft
   their own; seeds with too little evidence to fit; the High band's observed error against the 1% it
   was set from; calibration on the AFTER part.
 Synthetic data only: nothing here says anything about real fraud (PRD 28.3).
+
+RECALIBRATION-ONLY VARIANT (`run --variant recalibrated`, seeds 501-512, written before they were run). The meta-model
+above was well calibrated but did not rank errors better than the provisional index, so this variant keeps the
+provisional ORDER and learns only a monotone map from it to P(correct) (assay/trust/recalibrated.py). Everything else is
+the same: the same long datasets, the same evaluation window (the newest 35%), the same explanation sampling, and the
+same rule P1, P2, P3 and VERDICT above. The map is fitted on the OLDEST 65% (the meta-model's fit and calibration windows
+together, since there is one thing to fit, not two), and its interval comes from 200 bootstrap refits of those cases.
+A smoke run on seed 500, not in the set, checked only that it runs. Because the map cannot change the order, P2 and P3
+are expected to be non-inferior by construction; the open question is P1, and whether the gate's other criteria (which
+the provisional index meets only weakly per seed) pass on any seed.
 """
 
 from __future__ import annotations
@@ -49,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_many_seeds import boot_interval, parse_seeds, t_interval
 
 
-def run(seeds: list[int], out: Path, n_boot: int) -> None:
+def run(seeds: list[int], out: Path, n_boot: int, variant: str = "meta") -> None:
     from assay.detection import train_bundle
     from assay.trust.calibrated import CalibratedFitError
     from assay.validation.calibrated import CalibratedValidationConfig, evaluate_calibrated
@@ -67,8 +77,15 @@ def run(seeds: list[int], out: Path, n_boot: int) -> None:
         r = train_bundle(txns, ds.outcomes, cfg)
         cases = collect_cases(r, {t["txn_id"]: t for t in txns}, 10**6, explain_frac=0.25)
         try:
+            fit_model = None
+            if variant == "recalibrated":
+                from assay.trust.recalibrated import RecalibratedConfig, RecalibratedTrustModel
+
+                def fit_model(fc, fy, cc, cy):  # one map, fitted on both earlier windows together
+                    return RecalibratedTrustModel.fit(fc + cc, np.concatenate([fy, cy]), RecalibratedConfig(n_boot=200))
+
             _, report = evaluate_calibrated(cases, vcfg=CalibratedValidationConfig(n_boot=n_boot),
-                                            slice_at=novel_start.timestamp())
+                                            slice_at=novel_start.timestamp(), fit_model=fit_model)
             report["status"] = "fitted"
         except CalibratedFitError as e:
             report = {"status": "refused", "reason": str(e), "n_cases": len(cases.assessments),
@@ -192,12 +209,13 @@ def main() -> None:
     r.add_argument("--seeds", required=True)
     r.add_argument("--out", type=Path, required=True)
     r.add_argument("--n-boot", type=int, default=200)
+    r.add_argument("--variant", choices=("meta", "recalibrated"), default="meta")
     s = sub.add_parser("summarise")
     s.add_argument("folder", type=Path)
     s.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if a.cmd == "run":
-        run(parse_seeds(a.seeds), a.out, a.n_boot)
+        run(parse_seeds(a.seeds), a.out, a.n_boot, a.variant)
     else:
         res = summarise(a.folder)
         print(json.dumps(res, indent=1) if a.json else render(res))

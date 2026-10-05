@@ -31,6 +31,7 @@ SCHEMA_VERSION = "txn-1"
 START = datetime(2025, 1, 1, tzinfo=UTC)
 MULE_BENEFICIARIES = tuple(f"b-mule-{i}" for i in range(5))
 BURST_SIZE = (6, 12)
+RING_FRAUD_TYPE = "ring_attack"  # only exists when the entity-graph scenario is on
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,20 @@ class GeneratorConfig:
     dispute_window_days: int = 120  # OPD-2 working default
     fraud_confirm_delay_days: tuple[int, int] = (3, 40)
     outcome_coverage: float = 0.9  # share of fraud that ever gets a confirmed outcome
+    # Entity-graph scenario (PRD 13, H6). Off by default, and then the dataset is unchanged, because everything here draws
+    # from a SEPARATE random stream. When on: rings of customers who commit fraud together through shared devices, IP
+    # addresses and beneficiaries (each transaction looks ordinary on its own), and BENIGN sharing that looks the same
+    # to a count: families who share a device, and public IP addresses used by many unrelated customers.
+    graph_scenario: bool = False
+    n_rings: int = 5
+    ring_size: tuple[int, int] = (5, 8)
+    ring_campaigns: int = 4  # spread evenly over the timeline, so every period has some
+    ring_campaign_days: tuple[int, int] = (4, 9)
+    ring_txn_rate: float = 0.5  # fraud transactions per member per campaign day
+    n_families: int = 60
+    n_hubs: int = 3
+    hub_share: float = 0.02  # share of ordinary transactions that go through a public IP
+    family_device_share: float = 0.3
     # Analysts
     review_share: float = 0.15
     analyst_accuracy: float = 0.9
@@ -74,6 +89,7 @@ class SyntheticDataset:
     analyst_actions: list[dict] = field(default_factory=list)
     truth: dict[str, dict] = field(default_factory=dict)  # txn_id -> hidden ground truth
     analyst_quality: dict[str, float] = field(default_factory=dict)
+    structure: dict = field(default_factory=dict)  # the true rings and families, for judging a graph (graph scenario only)
 
     def matured_outcomes(self, as_of: datetime) -> list[dict]:
         """Outcomes whose maturity time is on or before `as_of` (PRD 3.3)."""
@@ -94,6 +110,38 @@ def generate(cfg: GeneratorConfig | None = None) -> SyntheticDataset:
     home = rng.choice(["GB", "IE", "FR", "DE"], cfg.n_customers, p=[0.85, 0.05, 0.05, 0.05])
     mule_customers = sorted(rng.choice(cfg.n_customers, 15, replace=False).tolist())
 
+    # The graph scenario's structure, from its own stream so that switching it off leaves everything else untouched.
+    grng = np.random.default_rng(cfg.seed + 90_001)
+    rings: list[dict] = []
+    families: dict[int, str] = {}
+    hub_ips: list[str] = []
+    if cfg.graph_scenario:
+        pool = [int(c) for c in grng.permutation(cfg.n_customers)]
+        for r in range(cfg.n_rings):
+            size = int(grng.integers(cfg.ring_size[0], cfg.ring_size[1] + 1))
+            members, pool = pool[:size], pool[size:]
+            campaigns = []
+            seg = max(1, (cfg.n_days - 30) // max(1, cfg.ring_campaigns))
+            for j in range(cfg.ring_campaigns):  # one campaign in each equal slice of the timeline
+                length = int(grng.integers(cfg.ring_campaign_days[0], cfg.ring_campaign_days[1] + 1))
+                lo = 5 + j * seg
+                campaigns.append((int(grng.integers(lo, max(lo + 1, lo + seg - length))), length))
+            rings.append({"id": f"ring-{r}", "members": members,
+                          "devices": [f"d-ring{r}-{i}" for i in range(int(grng.integers(1, 3)))],
+                          "ips": [f"ip-ring{r}-{i}" for i in range(int(grng.integers(2, 5)))],
+                          "bens": [f"b-ring{r}-{i}" for i in range(int(grng.integers(1, 3)))],
+                          "campaigns": campaigns})
+        fam_of: dict[str, list[str]] = {}
+        for f in range(cfg.n_families):
+            size = int(grng.integers(2, 4))
+            members, pool = pool[:size], pool[size:]
+            for m in members:
+                families[m] = f"d-family{f}"
+            fam_of[f"family-{f}"] = [f"c-{m:05d}" for m in members]
+        hub_ips = [f"ip-public{i}" for i in range(cfg.n_hubs)]
+        ds.structure = {"rings": {r["id"]: [f"c-{m:05d}" for m in r["members"]] for r in rings},
+                        "families": fam_of, "hubs": hub_ips}
+
     analysts = [f"an-{i:02d}" for i in range(cfg.n_analysts)]
     n_bad = round(cfg.bad_analyst_share * cfg.n_analysts)
     for i, a in enumerate(analysts):
@@ -107,7 +155,7 @@ def generate(cfg: GeneratorConfig | None = None) -> SyntheticDataset:
     counter = {"n": 0}
 
     def emit(t: datetime, cust: int, ftype: str | None, *, camouflage: bool, benign: bool,
-             drifted: bool, burst_step: int = 0) -> None:
+             drifted: bool, burst_step: int = 0, infra: dict | None = None) -> None:
         counter["n"] += 1
         n = counter["n"]
         txn_id = f"t-{n:08d}"
@@ -158,6 +206,8 @@ def generate(cfg: GeneratorConfig | None = None) -> SyntheticDataset:
             "country": country,
             "schema_version": SCHEMA_VERSION,
         }
+        if infra:  # shared infrastructure (graph scenario): overrides what the transaction would otherwise carry
+            txn.update(infra)
         # Generator-internal context, stripped by to_wire().
         txn["_ctx"] = {"baseline_amount": round(float(baseline[cust]), 2),
                        "home_country": str(home[cust]), "new_device": new_device,
@@ -222,7 +272,24 @@ def generate(cfg: GeneratorConfig | None = None) -> SyntheticDataset:
                     emit(t + timedelta(seconds=step * int(rng.integers(5, 40))), cust, ftype,
                          camouflage=False, benign=False, drifted=drifted, burst_step=step)
             else:
-                emit(t, cust, ftype, camouflage=camouflage, benign=benign, drifted=drifted)
+                infra = None
+                if cfg.graph_scenario:  # benign sharing, which a plain count cannot tell from a ring
+                    if cust in families and grng.random() < cfg.family_device_share:
+                        infra = {"device_hash": families[cust]}
+                    elif hub_ips and grng.random() < cfg.hub_share:
+                        infra = {"ip_hash": hub_ips[int(grng.integers(len(hub_ips)))]}
+                emit(t, cust, ftype, camouflage=camouflage, benign=benign, drifted=drifted, infra=infra)
+        for r in rings:  # ring campaigns: ordinary-looking transactions through shared infrastructure
+            if not any(start <= day < start + length for start, length in r["campaigns"]):
+                continue
+            for m in r["members"]:
+                for _ in range(int(grng.poisson(cfg.ring_txn_rate))):
+                    infra = {"device_hash": str(grng.choice(r["devices"])), "ip_hash": str(grng.choice(r["ips"]))}
+                    if grng.random() < 0.8:
+                        infra["beneficiary_pid"] = str(grng.choice(r["bens"]))
+                    t = START + timedelta(days=day, seconds=int(grng.integers(86400)))
+                    emit(t, m, RING_FRAUD_TYPE, camouflage=False, benign=False, drifted=drifted, infra=infra)
+                    ds.truth[f"t-{counter['n']:08d}"]["ring"] = r["id"]
     return ds
 
 

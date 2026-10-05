@@ -31,7 +31,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from assay import audit
 from assay.api.limits import RateLimiter
 from assay.auth import AuthError
+from assay.graph.service import GraphCache, GraphError, GraphService
 from assay.ingestion import IngestionService
+from assay.learning.lifecycle import LifecycleError
+from assay.learning.service import LearningConfig, LearningService
 from assay.policy import PolicyError, PolicyService
 from assay.review.service import ReviewError, ReviewService
 from assay.scoring import ScoringError, ScoringService
@@ -90,21 +93,33 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
                review: ReviewService | ReviewProvider | None = None,
                rate_limit_per_minute: int | None = DEFAULT_RATE_LIMIT,
                clock: Callable[[], float] = time.monotonic,
-               key_provider=None, oidc=None) -> FastAPI:
+               key_provider=None, oidc=None, learning: LearningConfig | None = None,
+               graph: GraphCache | None = None, oidc_client=None) -> FastAPI:
     """`key_provider` (an assay.crypto KeyProvider) lets audit exports be sealed with the tenant's
     key (FR-41). Without one, a request for a sealed export is refused rather than sent in the clear.
 
     `oidc` (an assay.auth.OidcVerifier) lets people sign in with the institution's identity provider
     (FR-42): they send `Authorization: Bearer <token>` instead of a signed request. Service callers
-    keep using signed requests. Without `oidc`, bearer tokens are refused."""
+    keep using signed requests. Without `oidc`, bearer tokens are refused.
+
+    `oidc_client` (an assay.auth.OidcClientConfig) is the public information the web app needs to start that sign-in.
+    It is served unauthenticated at /v1/auth/config, and only while `oidc` is also set."""
     provider = _as_provider(service, IngestionService)
     scorer = _as_provider(scoring, ScoringService)
     reviewer = _as_provider(review, ReviewService)
     app = FastAPI(title="Assay API", version="0.1.0")
+    graph_cache = graph or GraphCache()  # one incrementally built entity graph per tenant, shared by every request
 
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}
+
+    @app.get("/v1/auth/config")
+    def auth_config():
+        """What the web app needs to sign a person in. Public by design (it holds no secret), so it needs no credentials."""
+        if oidc is None or oidc_client is None:
+            return {"enabled": False}
+        return oidc_client.public()
 
     limiter = RateLimiter(rate_limit_per_minute, clock=clock) if rate_limit_per_minute else None
     # Failed sign-ins are written by callers who have not proven who they are, so only a few per key
@@ -294,6 +309,48 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         blind_guard(cred, decision_id)
         return with_scoring(cred, lambda sc: sc.counterfactuals(cred.tenant_id, decision_id, f"api:{cred.key_id}"))
 
+    def with_graph(cred: Credential, fn):
+        if scorer is None:
+            raise HTTPException(404, {"code": "not_found"})
+        try:
+            with scorer() as sc:
+                return fn(GraphService(sc, graph_cache))
+        except GraphError as e:
+            raise HTTPException(e.http, {"code": e.code, "detail": str(e)}) from None
+        except ScoringError as e:
+            raise HTTPException(404, {"code": "not_found", "detail": str(e)}) from None
+
+    @app.get("/v1/me")
+    def me(auth=Depends(authed)):
+        """Who the caller is and what they may do, so the web app can show the right screens after sign-in. It reads the
+        verified credential and nothing else: roles come from the token's mapped groups, never from the browser."""
+        cred, _ = auth
+        return {"subject": cred.key_id, "tenant": cred.tenant_id, "roles": sorted(cred.roles),
+                "method": "sso" if not cred.secret else "signed"}
+
+    @app.get("/v1/decisions/{decision_id}/graph")
+    def get_graph(decision_id: str, auth=Depends(authed)):
+        """What else is linked to this case through shared devices, IP addresses and beneficiaries, as the graph stood when
+        the decision was made, with how sure the graph is of each link (PRD 13). Investigator context, never a model input
+        and never for a customer. Same access rules as the explanation, including blind review; reading is audited."""
+        cred, _ = auth
+        need(cred, "analyst", "auditor")
+        blind_guard(cred, decision_id)
+        return with_graph(cred, lambda gs: gs.neighbourhood(cred.tenant_id, decision_id, f"api:{cred.key_id}"))
+
+    @app.post("/v1/graph/edges/flag", status_code=201)
+    def flag_graph_edge(auth=Depends(authed)):
+        """An analyst says a relationship is wrong (PRD 13.7): it is down-weighted from now, never deleted, and the reason
+        is stored. Anyone who may read the graph on a case may flag a link on it."""
+        cred, body = auth
+        need(cred, "analyst", "senior_analyst")
+        p = parse(body)
+        if not isinstance(p, dict) or set(p) - {"relationship", "src", "dst", "reason"}:
+            raise HTTPException(422, {"code": "bad_request", "detail": "send relationship, src, dst and reason"})
+        return with_graph(cred, lambda gs: gs.flag(
+            cred.tenant_id, f"u:{cred.key_id}", rel=str(p.get("relationship") or ""), src=str(p.get("src") or ""),
+            dst=str(p.get("dst") or ""), reason=str(p.get("reason") or "")))
+
     @app.get("/v1/decisions/{decision_id}/lineage")
     def get_lineage(decision_id: str, auth=Depends(authed)):
         cred, _ = auth
@@ -462,6 +519,96 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         cred, _ = auth
         need(cred, "approver")
         return with_policy(lambda ps: ps.approve(cred.tenant_id, f"u:{cred.key_id}", policy_id))
+
+    # -- continuous learning: feedback pool and candidate models (PRD 11, 12) ----------------------------------
+    # Creating a candidate trains a model, which is a job for a worker or script (python -m assay learn), not a
+    # request. Here a person reads the evidence and takes each governed step; none happens by itself.
+    def with_learning(fn):
+        if scorer is None:
+            raise HTTPException(404, {"code": "not_found"})
+        try:
+            with scorer() as sc:
+                return fn(LearningService(sc.repo, sc, learning))
+        except LifecycleError as e:
+            raise HTTPException(e.http, {"code": e.code, "detail": str(e)}) from None
+        except ScoringError as e:
+            raise HTTPException(404, {"code": "not_found", "detail": str(e)}) from None
+
+    def body_object(body: bytes) -> dict:
+        p = parse(body) if body else {}
+        if not isinstance(p, dict):
+            raise HTTPException(400, {"code": "expected_object"})
+        return p
+
+    @app.get("/v1/learning/status")
+    def learning_status(auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "admin", "approver", "auditor", "manager")
+        return with_learning(lambda ls: ls.status(cred.tenant_id))
+
+    @app.get("/v1/learning/feedback-pool")
+    def learning_pool(auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "admin", "approver", "auditor", "manager")
+        return with_learning(lambda ls: ls.pool_summary(cred.tenant_id))
+
+    @app.get("/v1/learning/candidates")
+    def learning_candidates(auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "admin", "approver", "auditor")
+        return {"items": with_learning(lambda ls: ls.candidates(cred.tenant_id))}
+
+    @app.get("/v1/learning/candidates/{candidate_id}")
+    def learning_candidate(candidate_id: str, auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "admin", "approver", "auditor")
+        return with_learning(lambda ls: ls.get(cred.tenant_id, candidate_id))
+
+    @app.post("/v1/learning/candidates/{candidate_id}/shadow")
+    def learning_shadow(candidate_id: str, auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "admin", "approver")
+        return with_learning(lambda ls: ls.start_shadow(cred.tenant_id, f"u:{cred.key_id}", candidate_id))
+
+    @app.post("/v1/learning/candidates/{candidate_id}/approve")
+    def learning_approve(candidate_id: str, auth=Depends(authed)):
+        cred, body = auth
+        need(cred, "approver")
+        p = body_object(body)
+        if set(p) - {"waived", "reviewed_segments", "rationale"}:
+            raise HTTPException(422, {"code": "unknown_fields"})
+        return with_learning(lambda ls: ls.approve(
+            cred.tenant_id, f"u:{cred.key_id}", candidate_id, waived=list(p.get("waived") or []),
+            reviewed_segments=bool(p.get("reviewed_segments")), rationale=str(p.get("rationale") or "")))
+
+    @app.post("/v1/learning/candidates/{candidate_id}/canary")
+    def learning_canary(candidate_id: str, auth=Depends(authed)):
+        cred, body = auth
+        need(cred, "approver")
+        share = body_object(body).get("share")
+        if isinstance(share, bool) or not isinstance(share, (int, float)):
+            raise HTTPException(422, {"code": "share_required"})
+        return with_learning(lambda ls: ls.start_canary(cred.tenant_id, f"u:{cred.key_id}", candidate_id, float(share)))
+
+    @app.post("/v1/learning/candidates/{candidate_id}/promote")
+    def learning_promote(candidate_id: str, auth=Depends(authed)):
+        cred, _ = auth
+        need(cred, "approver")
+        return with_learning(lambda ls: ls.promote(cred.tenant_id, f"u:{cred.key_id}", candidate_id))
+
+    @app.post("/v1/learning/candidates/{candidate_id}/rollback")
+    def learning_rollback(candidate_id: str, auth=Depends(authed)):
+        cred, body = auth
+        need(cred, "approver")
+        reason = str(body_object(body).get("reason") or "")
+        return with_learning(lambda ls: ls.rollback(cred.tenant_id, f"u:{cred.key_id}", candidate_id, reason))
+
+    @app.post("/v1/learning/candidates/{candidate_id}/reject")
+    def learning_reject(candidate_id: str, auth=Depends(authed)):
+        cred, body = auth
+        need(cred, "admin", "approver")
+        reason = str(body_object(body).get("reason") or "")
+        return with_learning(lambda ls: ls.reject(cred.tenant_id, f"u:{cred.key_id}", candidate_id, reason))
 
     # -- governance reads (PRD 12, 26.2) -----------------------------------------------------------------
     @app.get("/v1/validation/reports")

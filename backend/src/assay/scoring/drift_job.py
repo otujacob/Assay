@@ -37,7 +37,7 @@ def run_drift_job(scoring, tenant_id: str, cfg: DriftJobConfig | None = None,
                   actor: str = "drift-job") -> dict:
     """One run for a tenant. Returns {"status": "ok" | "skipped", ...}; "ok" carries the stored run."""
     cfg = cfg or DriftJobConfig()
-    repo, lb = scoring.repo, scoring.registry.champion(tenant_id)
+    repo, lb = scoring.repo, scoring.deciding_bundle(tenant_id)
     rows = [r for r in repo.find(tenant_id, "feature_vectors", newest_first=True, limit=cfg.window)
             if r["feature_set_version"] == lb.manifest.feature_set_version
             and len(r["feature_values"]) == lb.n_features]

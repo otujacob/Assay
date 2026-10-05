@@ -1,5 +1,6 @@
+import { getToken } from "./auth/oidc";
 import type {
-  ActionRequest, ActionResponse, AuditResponse, BundleInfo, CounterfactualView, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
+  ActionRequest, ActionResponse, AuditResponse, BundleInfo, Candidate, CounterfactualView, FeedbackPool, GraphView, LearningStatus, PolicyPreview, PolicyVersion, CaseView, Dashboard, DemoUser, QueueResponse, ValidationReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -17,6 +18,16 @@ try {
 }
 
 export const getUser = (): string => currentUser;
+
+/** Called when the API refuses a signed-in person's token (it expired, or MFA was missing). Set by the root component. */
+let onUnauthorized: ((code: string, message: string) => void) | null = null;
+export const setUnauthorizedHandler = (fn: ((code: string, message: string) => void) | null): void => { onUnauthorized = fn; };
+
+/** A signed-in person sends their token; the demo sends a demo user (its proxy signs for them). */
+const authHeaders = (): Record<string, string> => {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : { "X-Demo-User": currentUser };
+};
 export function setUser(key: string): void {
   currentUser = key;
   try {
@@ -29,7 +40,7 @@ export function setUser(key: string): void {
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
-    headers: { "Content-Type": "application/json", "X-Demo-User": currentUser },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -43,6 +54,7 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
     const detail = (data as { detail?: { code?: string; detail?: string } | string } | null)?.detail;
     const code = typeof detail === "object" && detail ? (detail.code ?? "error") : "error";
     const msg = typeof detail === "object" && detail ? (detail.detail ?? detail.code ?? res.statusText) : String(detail ?? res.statusText);
+    if (res.status === 401 && getToken()) onUnauthorized?.(code, msg);
     throw new ApiError(res.status, code, msg);
   }
   return data as T;
@@ -95,7 +107,19 @@ const auditQs = (f: AuditFilters, format?: "csv"): string => {
   return s ? `?${s}` : "";
 };
 
+export type CandidateStep = "shadow" | "approve" | "canary" | "promote" | "rollback" | "reject";
+
+export interface FlagEdgeRequest { relationship: string; src: string; dst: string; reason: string }
+
 export const api = {
+  me: () => call<{ subject: string; tenant: string; roles: string[]; method: string }>("GET", "/me"),
+  graph: (decisionId: string) => call<GraphView>("GET", `/decisions/${decisionId}/graph`),
+  flagEdge: (body: FlagEdgeRequest) => call<{ flagged: boolean }>("POST", "/graph/edges/flag", body),
+  learningStatus: () => call<LearningStatus>("GET", "/learning/status"),
+  feedbackPool: () => call<FeedbackPool>("GET", "/learning/feedback-pool"),
+  candidates: () => call<{ items: Candidate[] }>("GET", "/learning/candidates"),
+  candidateStep: (id: string, step: CandidateStep, body: Record<string, unknown> = {}) =>
+    call<Candidate>("POST", `/learning/candidates/${id}/${step}`, body),
   counterfactuals: (decisionId: string) => call<CounterfactualView>("GET", `/decisions/${decisionId}/counterfactuals`),
   policies: () => call<{ items: PolicyVersion[] }>("GET", "/config/policies"),
   proposePolicy: (body: PolicyRequest) => call<PolicyVersion>("POST", "/config/policies", body),
@@ -104,7 +128,7 @@ export const api = {
   audit: (f: AuditFilters = {}) => call<AuditResponse>("GET", `/audit/export${auditQs(f)}`),
   /** The CSV export as a Blob, so the browser can save it (the demo user is a header, not a cookie). */
   auditCsv: async (f: AuditFilters = {}): Promise<Blob> => {
-    const res = await fetch(`/api/audit/export${auditQs(f, "csv")}`, { headers: { "X-Demo-User": currentUser } });
+    const res = await fetch(`/api/audit/export${auditQs(f, "csv")}`, { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, "audit_export", res.statusText);
     return res.blob();
   },

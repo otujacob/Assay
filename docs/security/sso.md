@@ -1,9 +1,10 @@
 # Single sign-on and MFA (FR-42)
 
 Status: **pre-pilot, and not tested against a real identity provider.** The verification rules are
-tested with keys and tokens generated in the test suite (`backend/tests/test_sso.py`). That shows
-the rules work. It does not show that any particular provider's tokens satisfy them. No security
-review has been done (PRD Gate 1).
+tested with keys and tokens generated in the test suite (`backend/tests/test_sso.py`), and the browser sign-in is tested end to end
+against a STAND-IN provider that issues real RS256 tokens (`backend/tests/mock_idp.py`, `web/scripts/e2e-sso.mjs`). That shows our
+client and server agree with each other. It does not show that any particular provider's tokens or endpoints satisfy them. No
+security review has been done (PRD Gate 1).
 
 ## What exists
 
@@ -51,12 +52,55 @@ The provider's key set is cached for an hour and refetched when a token names an
 provider rotated), but not more than once a minute, so junk key ids cannot make this service
 hammer the provider.
 
+## The browser sign-in
+
+When the server publishes sign-in settings, the web app makes a person sign in before it shows or requests anything. Otherwise it
+is the demo, which uses its signing proxy (`X-Demo-User`, which is not authentication and exists only for the demo).
+
+```
+ASSAY_OIDC_CLIENT_ID=assay-web
+ASSAY_OIDC_AUTHORIZATION_ENDPOINT=https://idp.example.org/authorize
+ASSAY_OIDC_TOKEN_ENDPOINT=https://idp.example.org/token
+# optional
+ASSAY_OIDC_SCOPE="openid profile"                       # default: openid
+ASSAY_OIDC_REDIRECT_URI=https://assay.example.org/      # default: where the app is served from
+ASSAY_OIDC_END_SESSION_ENDPOINT=https://idp.example.org/logout
+ASSAY_OIDC_AUTH_AUDIENCE=assay-api                      # for providers that mint access tokens per API (Auth0 style)
+ASSAY_OIDC_TOKEN_USE=access_token                       # or id_token, if the API audience is the web client's id
+```
+These are public values, served unauthenticated at `GET /v1/auth/config` and only while single sign-on itself is on. Endpoints must
+be `https` (a local `http://127.0.0.1` address is allowed, for testing against a stand-in provider).
+
+**Flow.** Authorization code with PKCE (S256), `state` and `nonce`. The web app is a public client, so there is no client secret.
+The browser asks the provider's token endpoint for the token directly, so **the provider must allow cross-origin requests from the
+app's origin** (most do for single-page apps; it is a setting to check). The token goes to the API as `Authorization: Bearer`.
+`GET /v1/me` then reports the person's subject, tenant and roles from the **verified token**; the web app shows the screens those
+roles allow, and nothing in the browser grants access.
+
+What the browser checks: `state` (a callback it did not start is refused; an attempt can be completed once) and the ID token's
+`nonce`. What it does not check, because the API does on every request: the token's signature, issuer, audience, lifetime, MFA and roles.
+
+Where the token is kept: in memory and in `sessionStorage`, so a reload does not sign the person out. `sessionStorage` is per-tab and
+cleared when the tab closes, but any script on the page can read it. The app loads no third-party script. Keep token lifetimes short
+at the provider; the API also refuses a token whose `iat` is older than `ASSAY_OIDC_MAX_TOKEN_AGE_S`.
+
+Outcomes a person sees: no session means the sign-in screen and **no API calls**; a sign-in with a password only gives "multi-factor
+authentication is required"; someone with no mapped group signs in and is told they have no access; a token the API stops accepting
+ends the session; the provider cancelling or refusing returns to sign-in with its reason. Signing out clears the session and, if the
+provider has a logout endpoint, ends its session too.
+
+Try it: `python backend/scripts/demo_sso.py` serves the app on port 8001 with a stand-in provider on port 8100, and
+`node web/scripts/e2e-sso.mjs` drives it in a real browser.
+
 ## What does not exist
 
-- **The browser sign-in.** The web app still uses the demo proxy (`X-Demo-User`), which is not
-  authentication. A real deployment needs the web app to sign people in with the provider
-  (authorization code with PKCE) and send the token. That depends on the institution's provider,
-  client registration and redirect addresses, so it is not built.
+- **Any test against a real provider.** The stand-in is ours: it uses the claim names we expect, allows any origin, and has no
+  refresh, consent screen, session cookie, step-up or clock skew. A real provider needs the client registered (public client, PKCE,
+  the redirect address), its CORS settings checked, its group and MFA claims mapped, and the sign-in tested with real accounts.
+- **Silent renewal and refresh tokens.** When a token runs out the person signs in again. That is deliberate (short sessions, nothing
+  long-lived in the browser), and it costs convenience.
+- **A back-channel logout.** Signing out ends this tab's session and the provider's, but other tabs and devices keep theirs until
+  their tokens expire.
 - **Interoperability.** Providers differ in where they put `amr`, groups and custom claims. Expect
   to adjust the claim names and role map, and test with the real provider before relying on it.
 - **SAML.** The PRD allows SAML or OIDC; only OIDC is built.

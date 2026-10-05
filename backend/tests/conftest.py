@@ -1,3 +1,4 @@
+import contextlib
 import itertools
 import os
 from pathlib import Path
@@ -40,4 +41,10 @@ def pg_conn():
     conn.schema = schema
     yield conn
     conn.rollback()
+    # Drop the schema so a long-lived test database does not fill with hundreds of them, which makes every
+    # later test slower. Best effort: a test that left another connection open just leaves its schema behind.
+    with contextlib.suppress(Exception):
+        conn.autocommit = True
+        conn.execute("SET lock_timeout = '3s'")
+        conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     conn.close()

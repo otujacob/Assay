@@ -14,6 +14,9 @@ Configuration comes from the environment:
                             opens sealed bundles (FR-41). Production should use a managed key service
                             behind the same assay.crypto.KeyProvider interface instead.
   ASSAY_REQUIRE_ENCRYPTED_BUNDLES   "1" refuses any bundle that is not sealed with the tenant key.
+  ASSAY_CANDIDATE_DIR       where candidate models (python -m assay.learning create) are saved. Every worker
+                            loads a candidate from here on demand once its lifecycle record says it is in shadow,
+                            canary or promoted, so the directory must be shared between them.
   ASSAY_OIDC_ISSUER, ASSAY_OIDC_AUDIENCE, ASSAY_OIDC_JWKS_URL   turn on single sign-on (FR-42): people
                             present an OpenID Connect bearer token from the institution's provider.
                             ASSAY_OIDC_ROLE_MAP is JSON mapping the provider's groups to Assay roles,
@@ -22,6 +25,10 @@ Configuration comes from the environment:
                             ASSAY_OIDC_MFA_ACR (comma-separated acr values accepted as MFA),
                             ASSAY_OIDC_MAX_TOKEN_AGE_S (default 3600). MFA is required unless
                             ASSAY_OIDC_REQUIRE_MFA=0, which exists for testing and should not be used.
+  ASSAY_OIDC_CLIENT_ID, ASSAY_OIDC_AUTHORIZATION_ENDPOINT, ASSAY_OIDC_TOKEN_ENDPOINT   turn on the web app's browser
+                            sign-in (authorization code with PKCE). Public values, served at /v1/auth/config. Optional:
+                            ASSAY_OIDC_SCOPE (default "openid"), ASSAY_OIDC_REDIRECT_URI, ASSAY_OIDC_END_SESSION_ENDPOINT,
+                            ASSAY_OIDC_AUTH_AUDIENCE, ASSAY_OIDC_TOKEN_USE ("access_token" default, or "id_token").
 Without ASSAY_BUNDLES the server runs ingestion only.
 """
 
@@ -29,7 +36,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from contextlib import contextmanager
+from pathlib import Path
 
 from psycopg.rows import tuple_row
 from psycopg_pool import ConnectionPool
@@ -38,6 +47,7 @@ from assay.api.app import Credential, Credentials, create_app
 from assay.detection import load_bundle
 from assay.ingestion import IngestionService
 from assay.ingestion.pg_repo import PostgresRepository
+from assay.learning.service import LearningConfig
 from assay.review.service import ReviewService
 from assay.scoring import BundleRegistry, ScoringService
 
@@ -104,6 +114,27 @@ def oidc_from_env():
     return OidcVerifier(cfg, HttpJwks(os.environ["ASSAY_OIDC_JWKS_URL"]))
 
 
+def oidc_client_from_env():
+    """The browser sign-in settings if ASSAY_OIDC_CLIENT_ID is set (and single sign-on is on), else None."""
+    client_id = os.environ.get("ASSAY_OIDC_CLIENT_ID")
+    if not client_id:
+        return None
+    if not os.environ.get("ASSAY_OIDC_ISSUER"):
+        raise RuntimeError("ASSAY_OIDC_CLIENT_ID is set but single sign-on is not on (ASSAY_OIDC_ISSUER)")
+    missing = [k for k in ("ASSAY_OIDC_AUTHORIZATION_ENDPOINT", "ASSAY_OIDC_TOKEN_ENDPOINT") if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(f"browser sign-in is on (ASSAY_OIDC_CLIENT_ID) but {', '.join(missing)} is not set")
+    from assay.auth import OidcClientConfig
+
+    return OidcClientConfig(
+        client_id=client_id, authorization_endpoint=os.environ["ASSAY_OIDC_AUTHORIZATION_ENDPOINT"],
+        token_endpoint=os.environ["ASSAY_OIDC_TOKEN_ENDPOINT"], scope=os.environ.get("ASSAY_OIDC_SCOPE", "openid"),
+        redirect_uri=os.environ.get("ASSAY_OIDC_REDIRECT_URI") or None,
+        end_session_endpoint=os.environ.get("ASSAY_OIDC_END_SESSION_ENDPOINT") or None,
+        audience=os.environ.get("ASSAY_OIDC_AUTH_AUDIENCE") or None,
+        token_use=os.environ.get("ASSAY_OIDC_TOKEN_USE", "access_token"))
+
+
 def load_registry(specs: list[dict], key: bytes, provider=None,
                   require_encryption: bool | None = None) -> BundleRegistry:
     if require_encryption is None:
@@ -118,6 +149,26 @@ def load_registry(specs: list[dict], key: bytes, provider=None,
                                          require_encryption=require_encryption)
         registry.register(s["tenant_id"], artefact, manifest, trust_mode=s.get("trust_mode", "provisional"))
     return registry
+
+
+def candidate_loader(registry: BundleRegistry, directory: str, key: bytes, provider=None,
+                     require_encryption: bool = False):
+    """Loads a candidate's signed bundle the first time a process needs it (shadow, canary, promotion). The
+    signature is verified before anything is deserialised, as for every other bundle."""
+    root = Path(directory)
+    ok = re.compile(r"[A-Za-z0-9._-]{1,128}")
+
+    def load(tenant_id: str, bundle_id: str):
+        if not (ok.fullmatch(tenant_id) and ok.fullmatch(bundle_id)) or bundle_id in (".", ".."):
+            return None  # nothing user-controlled is turned into a path unchecked
+        path = root / tenant_id / bundle_id
+        if not path.is_dir():
+            return None
+        artefact, manifest = load_bundle(path, tenant_id, key, decrypt_with=provider,
+                                         require_encryption=require_encryption)
+        return registry.register(tenant_id, artefact, manifest, champion=False)
+
+    return load
 
 
 def refuse_superuser(pool: ConnectionPool) -> None:
@@ -137,14 +188,21 @@ def build_app():
     creds = [Credential(c["key_id"], c["tenant_id"], c["secret"].encode(),
                         frozenset(c.get("roles", ["ingest"])))
              for c in json.loads(os.environ["ASSAY_DEV_CREDENTIALS"])]
-    scoring = review = None
+    scoring = review = learning = None
     if os.environ.get("ASSAY_BUNDLES"):
         registry = load_registry(json.loads(os.environ["ASSAY_BUNDLES"]),
                                  os.environ["ASSAY_BUNDLE_SIGNING_KEY"].encode(), key_provider_from_env())
+        provider, signing = key_provider_from_env(), os.environ["ASSAY_BUNDLE_SIGNING_KEY"].encode()
+        candidates = os.environ.get("ASSAY_CANDIDATE_DIR")
+        if candidates:
+            registry.loader = candidate_loader(registry, candidates, signing, provider,
+                                               os.environ.get("ASSAY_REQUIRE_ENCRYPTED_BUNDLES") == "1")
+        learning = LearningConfig(bundle_dir=candidates or None, signing_key=signing, key_provider=provider)
         scoring = make_scoring_provider(pool, registry)
         review = make_review_provider(pool, registry)
     return create_app(make_provider(pool), Credentials(creds), scoring=scoring, review=review,
-                      key_provider=key_provider_from_env(), oidc=oidc_from_env())
+                      key_provider=key_provider_from_env(), oidc=oidc_from_env(), learning=learning,
+                      oidc_client=oidc_client_from_env())
 
 
 def __getattr__(name: str):

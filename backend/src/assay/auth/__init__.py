@@ -4,9 +4,10 @@
 `StaticJwks` need the optional `sso` extra (PyJWT) and are loaded on first use.
 """
 
-from .base import HUMAN_ROLES, AuthError, OidcConfig, Principal
+from .base import HUMAN_ROLES, AuthError, OidcClientConfig, OidcConfig, Principal
 
-__all__ = ["HUMAN_ROLES", "AuthError", "HttpJwks", "OidcConfig", "OidcVerifier", "Principal", "StaticJwks"]
+__all__ = ["HUMAN_ROLES", "AuthError", "HttpJwks", "OidcClientConfig", "OidcConfig", "OidcVerifier", "Principal",
+           "StaticJwks"]
 
 
 def __getattr__(name: str):

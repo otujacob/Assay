@@ -3,6 +3,7 @@ import { ApiError, api, getUser, setUser } from "./api";
 import { AuditLog } from "./components/AuditLog";
 import { CaseDetails } from "./components/CaseDetails";
 import { Governance } from "./components/Governance";
+import { ModelUpdates } from "./components/ModelUpdates";
 import { PolicyPanel } from "./components/PolicyPanel";
 import { KpiCards } from "./components/KpiCards";
 import { EMPTY_FILTERS, ReviewQueue, type QueueFilterState } from "./components/ReviewQueue";
@@ -17,9 +18,15 @@ const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === "fulfille
 // slow answer for the previous user cannot fill the new user's screen or open a case they may not see.
 const stale = (asked: string): boolean => getUser() !== asked;
 
-export default function App() {
-  const [users, setUsers] = useState<DemoUser[]>([]);
-  const [user, setUserState] = useState(getUser());
+export interface SsoProps {
+  user: DemoUser;  // who signed in, and the roles the server says they hold
+  tenant: string;
+  onSignOut: () => void;
+}
+
+export default function App({ sso }: { sso?: SsoProps } = {}) {
+  const [users, setUsers] = useState<DemoUser[]>(sso ? [sso.user] : []);
+  const [user, setUserState] = useState(sso ? sso.user.key : getUser());
   const [queue, setQueue] = useState<QueueResponse | null>(null);
   const [filters, setFilters] = useState<QueueFilterState>(EMPTY_FILTERS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -45,8 +52,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (sso) return; // a signed-in person is the only "user"; there is no demo user list
     api.users().then(setUsers).catch((e: Error) => setError(`Cannot reach the demo server: ${e.message}`));
-  }, []);
+  }, [sso]);
 
   const loadQueue = useCallback(async (f: QueueFilterState) => {
     const asked = getUser();
@@ -146,11 +154,14 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="demo-banner">
-        DEMO: synthetic data and a dev-only signing proxy. Not for production: real deployments use single sign-on.
-      </div>
+      {!sso && (
+        <div className="demo-banner">
+          DEMO: synthetic data and a dev-only signing proxy. Not for production: real deployments use single sign-on.
+        </div>
+      )}
       <TopBar users={users} user={user} onUser={switchUser} search={filters.search}
-              onSearch={(s) => setFilters({ ...filters, search: s })} dash={dash} />
+              onSearch={(s) => setFilters({ ...filters, search: s })} dash={dash}
+              sso={sso ? { label: sso.user.label, tenant: sso.tenant, onSignOut: sso.onSignOut } : undefined} />
       {error && <div className="banner-error" role="alert">{error}</div>}
       <div className="page-title">
         <h1>AI Decision Intelligence Dashboard</h1>
@@ -169,6 +180,9 @@ export default function App() {
           <Governance report={report} bundle={bundle} />
           {(roles.has("admin") || roles.has("approver") || roles.has("auditor")) && (
             <PolicyPanel userKey={user} roles={roles} />
+          )}
+          {(roles.has("admin") || roles.has("approver") || roles.has("auditor")) && (
+            <ModelUpdates userKey={user} roles={roles} />
           )}
           {roles.has("auditor") && <AuditLog />}
         </div>

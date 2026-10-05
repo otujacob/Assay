@@ -180,6 +180,9 @@ describe("App", () => {
       }
       if (user === "analyst" && url.pathname === "/api/review/cases/d-1") return json(caseView());
       if (url.pathname === "/api/config/policies") return json({ items: [] });
+      if (url.pathname === "/api/learning/status") return json({ champion: null, shadow: null, canary: null, candidates: 0 });
+      if (url.pathname === "/api/learning/feedback-pool") return json({ cases: 0, accepted: 0, rejected: 0, deferred: 0, acceptance_rate: null, accepted_by_level: {}, not_accepted_reasons: {}, flagged: {}, note: "" });
+      if (url.pathname === "/api/learning/candidates") return json({ items: [] });
       return forbidden();
     }));
     render(<App />);
@@ -209,6 +212,9 @@ describe("App", () => {
       if (user === "analyst" && url.pathname === "/api/review/queue") return json(queue().body);
       if (user === "analyst" && url.pathname === "/api/review/cases/d-1") return json(caseView());
       if (url.pathname === "/api/config/policies") return json({ items: [] });
+      if (url.pathname === "/api/learning/status") return json({ champion: null, shadow: null, canary: null, candidates: 0 });
+      if (url.pathname === "/api/learning/feedback-pool") return json({ cases: 0, accepted: 0, rejected: 0, deferred: 0, acceptance_rate: null, accepted_by_level: {}, not_accepted_reasons: {}, flagged: {}, note: "" });
+      if (url.pathname === "/api/learning/candidates") return json({ items: [] });
       return json({ detail: { code: "forbidden", detail: "forbidden" } }, 403);
     }));
     render(<App />);

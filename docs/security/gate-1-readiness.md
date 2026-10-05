@@ -23,7 +23,7 @@ exists for it, and what is needed from others. It is a working document, not a c
 |---|---|---|
 | Encryption at rest | **Partly** | Model bundles and audit exports can be sealed per tenant. Database and backup encryption is a hosting setting, not verified here |
 | Encryption in transit | **Not built here** | TLS and mutual TLS are deployment settings. The API speaks plain HTTP behind whatever terminates TLS |
-| Authentication, SSO | **Built, not interoperability-tested** | Bearer-token verification; no browser sign-in flow; see `sso.md` |
+| Authentication, SSO | **Built, not interoperability-tested** | Bearer-token verification and a browser sign-in (authorization code with PKCE), tested end to end against a stand-in provider only; see `sso.md` |
 | MFA | **Enforced through the token** | Relies on the provider reporting it truthfully in `amr` or `acr` |
 | Role-based access | **Built** | Permission tests per route. Separation of duties for policies (proposer cannot approve) is enforced in the service and the database |
 | Audit logs | **Built** | Append-only, hash-chained, row-level secured. Failed sign-ins and refused roles are recorded; reading the log is recorded |

@@ -64,6 +64,12 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "policy_versions": ("schema_version", "version", "payload", "effective_from"),
     "policy_approvals": ("schema_version", "policy_version_id", "proposed_by", "approved_by",
                          "approved_at"),
+    "model_candidates": ("schema_version", "candidate_id", "base_bundle_id", "artefact_path", "pool_summary",
+                         "training", "gates"),
+    "model_lifecycle_events": ("schema_version", "candidate_id", "created_by_candidate", "kind", "detail"),
+    "shadow_scores": ("schema_version", "txn_id", "candidate_id", "champion_id", "candidate_risk",
+                      "champion_risk", "candidate_call", "champion_call"),
+    "graph_edge_flags": ("schema_version", "rel", "src", "dst", "reason", "flagged_at"),
     "drift_runs": ("schema_version", "bundle_id", "n_reference", "n_window", "window_start",
                    "window_end", "feature_names", "drift", "max_drift", "alarm_level", "alarm"),
 }
@@ -71,7 +77,8 @@ JSONB_COLUMNS = frozenset({"reasons", "manifest", "definition_versions", "featur
                            "feature_values", "params", "attributions", "reason_codes", "components",
                            "weights_used", "evidence", "measures", "baselines", "ablations",
                            "stress_results", "pass_criteria", "limitations", "evidence_checklist",
-                           "display_state", "payload", "drift"})
+                           "display_state", "payload", "drift", "pool_summary", "training", "gates",
+                           "detail"})
 
 
 def _norm(row: dict[str, Any]) -> dict[str, Any]:

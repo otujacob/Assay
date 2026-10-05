@@ -24,6 +24,7 @@ from assay.features import (
     definition_versions,
     find_leaks,
 )
+from assay.features.compute import parse_time
 from assay.trust.reference import TrustReference, build_reference
 from assay.trust.reliability import Cohort, CohortStore, amount_band, risk_band_name
 
@@ -95,7 +96,11 @@ def dataset_id(txn_ids: list[str], y: np.ndarray) -> str:
     return h.hexdigest()
 
 
-def train_bundle(txns: list[dict], outcomes: list[dict], cfg: TrainingConfig) -> TrainingResult:
+def train_bundle(txns: list[dict], outcomes: list[dict], cfg: TrainingConfig,
+                 extra_labels: dict[str, int] | None = None) -> TrainingResult:
+    """`extra_labels` (txn_id -> 0/1) are ACCEPTED analyst labels for cases with no matured verified outcome
+    (learning/pool.py). They may only enter the TRAINING window. Calibration, reliability and test windows
+    use verified outcomes only, so a candidate is never judged on labels that analysts influenced (PRD 11.4)."""
     # G1: point-in-time leakage check on a sample before anything is trained.
     leaks = find_leaks(sorted(txns, key=lambda x: x["event_time"])[: cfg.leak_check_rows],
                        sample_size=15)
@@ -104,6 +109,10 @@ def train_bundle(txns: list[dict], outcomes: list[dict], cfg: TrainingConfig) ->
 
     table = build_table(txns)
     labels = labels_as_of(txns, outcomes, cfg.as_of, cfg.horizon_days)
+    extra = {t: int(v) for t, v in (extra_labels or {}).items() if t not in labels}
+    by_time = {t["txn_id"]: parse_time(t["event_time"]) for t in txns} if extra else {}
+    extra = {t: v for t, v in extra.items() if t in by_time and by_time[t] < cfg.train_end}
+    labels = {**labels, **extra}
     keep = np.array([tid in labels for tid in table.txn_ids])
     if cfg.warmup_days:
         # History-window features (30-day velocity, beneficiary sharing) are still filling up at the
@@ -170,7 +179,7 @@ def train_bundle(txns: list[dict], outcomes: list[dict], cfg: TrainingConfig) ->
         dataset_id=dataset_id(table.txn_ids, y), dataset_tenant_ids=[cfg.tenant_id],
         code_commit=_git_commit(), params=model.params(),
         thresholds={"t_low": t_low, "t_high": t_high}, metrics=metrics, calibration=calibration,
-        extra={"class_balance": {"train_pos": int(y[tr].sum()), "train_n": int(tr.sum()),
+        extra={"extra_labels_used": len(extra), "class_balance": {"train_pos": int(y[tr].sum()), "train_n": int(tr.sum()),
                                  "cal_pos": int(y[ca].sum()), "cal_n": int(ca.sum())},
                "cost_matrix": {"fp": cfg.cost_fp, "fn": cfg.cost_fn}})
     # Cohorts are keyed by model version; re-key from the provisional id to the real bundle id.
