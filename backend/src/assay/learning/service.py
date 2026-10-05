@@ -19,6 +19,7 @@ from typing import Any
 from assay.detection import TrainingConfig, train_bundle
 from assay.detection.bundle import save_bundle
 from assay.learning import gates as G
+from assay.learning import monitor as mon
 from assay.learning.lifecycle import LifecycleConfig, LifecycleError, LifecycleStore
 from assay.learning.pool import POOL_VERSION, PoolConfig, PoolReport, assess
 from assay.review.service import _family
@@ -32,6 +33,7 @@ class LearningConfig:
     pool: PoolConfig = field(default_factory=PoolConfig)
     gates: G.GateConfig = field(default_factory=G.GateConfig)
     lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
+    monitor: mon.MonitorConfig = field(default_factory=mon.MonitorConfig)
     bundle_dir: Path | None = None  # candidates are saved here, signed; without it G8 fails
     signing_key: bytes | None = None
     key_provider: Any = None  # seals the artefact with the tenant key (FR-41)
@@ -154,6 +156,26 @@ class LearningService:
             self.scoring.registry.get(tenant_id, candidate_id)
         except ScoringError:
             raise LifecycleError("bundle_not_loaded", "the candidate's artefact is not available to this process", 503) from None
+
+    def check_health(self, tenant_id: str, *, act: bool = False, actor: str = "system:monitor") -> list[dict]:
+        """Judge every model now deciding live cases (a canary, or a promoted champion) on its matured outcomes. With
+        `act`, a clear breach rolls it back to the previous champion, with the evidence stored as the reason. It never
+        promotes, approves or starts anything."""
+        out = []
+        for c in self.store.candidates(tenant_id):
+            cid = c["candidate_id"]
+            if self.store.state_of(tenant_id, cid) not in ("canary", "champion"):
+                continue
+            lb = self.scoring.registry.get(tenant_id, cid)
+            risk, fraud, high = mon.collect(self.repo, tenant_id, cid)
+            rep = mon.evaluate(cid, risk, fraud, high, float(lb.manifest.thresholds["t_high"]),
+                               (lb.manifest.metrics or {}).get("at_t_high"), self.cfg.monitor).as_dict()
+            rep["rolled_back"] = False
+            if act and rep["status"] == "breach":
+                self.rollback(tenant_id, actor, cid, "automatic: " + "; ".join(rep["triggers"]))
+                rep["rolled_back"] = True
+            out.append(rep)
+        return out
 
     def status(self, tenant_id: str) -> dict:
         self.scoring.sync_routing(tenant_id)

@@ -34,8 +34,13 @@ def run_once(scoring: ScoringService, tenant_id: str, *, refine_limit: int = 100
              drift_cfg: DriftJobConfig | None = None) -> dict:
     refined = scoring.refine_pending(tenant_id, limit=refine_limit, actor="worker")
     drift = run_drift_job(scoring, tenant_id, drift_cfg)
+    from assay.learning.service import LearningService
+
+    with scoring.repo.atomic(tenant_id):  # a breach rolls the live model back to the previous champion, never forward
+        health = LearningService(scoring.repo, scoring).check_health(tenant_id, act=True)
     return {"refined": refined, "drift": drift["status"], "drift_reason": drift.get("reason"),
-            "alarm": bool(drift.get("run", {}).get("alarm"))}
+            "alarm": bool(drift.get("run", {}).get("alarm")),
+            "rolled_back": [h["bundle_id"] for h in health if h["rolled_back"]]}
 
 
 def run_cycle(tenants: list[str], open_scoring: Callable[[], AbstractContextManager[ScoringService]], *,

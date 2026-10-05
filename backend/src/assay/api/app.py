@@ -603,6 +603,13 @@ def create_app(service: IngestionService | ServiceProvider, credentials: Credent
         reason = str(body_object(body).get("reason") or "")
         return with_learning(lambda ls: ls.rollback(cred.tenant_id, f"u:{cred.key_id}", candidate_id, reason))
 
+    @app.get("/v1/learning/health")
+    def learning_health(auth=Depends(authed)):
+        """How each model deciding live cases is doing on matured outcomes. Reads only; nothing is rolled back."""
+        cred, _ = auth
+        need(cred, "admin", "approver", "auditor", "manager")
+        return {"items": with_learning(lambda ls: ls.check_health(cred.tenant_id))}
+
     @app.post("/v1/learning/candidates/{candidate_id}/reject")
     def learning_reject(candidate_id: str, auth=Depends(authed)):
         cred, body = auth

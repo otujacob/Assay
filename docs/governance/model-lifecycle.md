@@ -22,12 +22,24 @@ values (OPD-11, OPD-12).
 6. **Canary.** The approver sets a share of traffic (at most 50%) that the candidate decides. A transaction always
    takes the same path (a hash of its id), so a replay agrees.
 7. **Promotion.** Needs a canary that decided enough cases. The previous champion stays deployable.
-8. **Rollback.** Restores the previous champion at any point after the canary starts. A reason is required. A rolled-back
+8. **Rollback.** Restores the previous champion at any point after the canary starts. A reason is required. A person can do it, and so
+   can the monitor (below). A rolled-back
    or rejected candidate cannot be revived: create a new one.
 
 Every step is an append-only row (`model_candidates`, `model_lifecycle_events`, `shadow_scores`). The history is the
 order of the rows, and nothing is updated. Each worker reads the stored events at each scoring call, so all of them
 agree on which model decides, whichever one handled the request.
+
+## The degradation monitor (`assay/learning/monitor.py`)
+
+The worker (`python -m assay.worker`) judges every model deciding live cases, a canary or a promoted champion, on the cases it
+decided once their outcomes mature, and `GET /v1/learning/health` shows the same read-only. A clear breach rolls it back to the
+previous champion, recorded as `system:monitor` with the evidence as the reason. Triggers: calibration error above 0.05; High-trust
+cases wrong more often than 5% (the whole 95% interval above it, with at least 50 such cases); recall or precision clearly below what
+the model achieved on its validation holdout (the whole interval more than 0.10 below, with at least 30 frauds or flags). Under 150
+matured cases there is no verdict. It only ever rolls back, to a known-good model: it never approves, starts or promotes anything. The
+limits are working defaults (OPD-12). In a test, a deliberately degraded canary was rolled back and a healthy or thinly evidenced one
+was left alone; no real traffic has been monitored, and outcomes arrive late, so detection lags by the label delay.
 
 ## What the database refuses, in addition to the service
 
@@ -82,8 +94,7 @@ accept threshold, the corroboration requirement and the gate tolerances should b
 - Bounded automatic recalibration (V1 in the PRD), and any automatic promotion.
 - A kill switch that falls back to human review for all cases when no safe bundle exists. Rollback restores the
   previous champion only.
-- Rollback triggers evaluated automatically from matured outcomes (calibration breach, high-trust error rate,
-  degraded performance). Rollback is a person's decision; the numbers that should prompt it are on the dashboard
-  and in the validation reports.
+- Automatic rollback for a data-quality or operational incident (PRD 12.4). Drift alarms are reported by the drift job; an
+  operational incident is a person's call.
 - Approval authority is a role (`approver`). Whether that is the institution's model risk owner, Assay, or both is
   OPD-12.

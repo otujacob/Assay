@@ -151,3 +151,10 @@ def test_the_person_who_created_a_candidate_cannot_approve_it(api):
     assert r.status_code == 403 and r.json()["detail"]["code"] == "separation_of_duties"
     assert api["call"]("POST", f"{cid}/approve", "apr2", {"waived": ["G4"], "reviewed_segments": True,
                                                          "rationale": "reviewed"}).status_code == 200
+
+
+def test_health_is_readable_by_governance_roles_and_empty_when_nothing_is_live(api):
+    api["candidate"]()
+    for key, code in (("adm", 200), ("apr", 200), ("aud", 200), ("mgr", 200), ("ana", 403), ("ing", 403)):
+        assert api["call"]("GET", "/v1/learning/health", key).status_code == code, key
+    assert api["call"]("GET", "/v1/learning/health", "aud").json() == {"items": []}  # a validated candidate decides nothing
